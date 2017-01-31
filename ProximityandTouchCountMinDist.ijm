@@ -2,9 +2,10 @@
 	Uniqueness is guaranteed by labeling each roi with a different grayscale that matches the roi number
 	Each ROI defined by an original object is epanded in pixel increments and the number of enclosed gray shades defines the number of objects now within that expansion
 	Uses histogram macro functions so that no additional particle analysis is required.
-	6/9/2016 Peter J. Lee (NHMFL)
-	This version: v161108 adds a column for the minimum distance between each object and its closest neighbor
+	Peter J. Lee (NHMFL)
+	v161108 adds a column for the minimum distance between each object and its closest neighbor
 	v161109 adds check for edge objects
+	v170131 this version defaults to no correction for prior Watershed correction but provides option to enable it.
 */
 	requires("1.47r"); /* not sure of the actual latest working version byt 1.45 definitely doesn't work */
 	saveSettings(); /* To restore settings at the end */
@@ -30,16 +31,24 @@
 	imageHeight = getHeight();
 	imageDims = (imageWidth + imageHeight);
 	checkForUnits();
+	iterationLimit = floor(minOf(255, (minOf(imageWidth, imageHeight))/2));
+	columnSuggest = minOf(10, iterationLimit);
 	getPixelSize(unit, pixelWidth, pixelHeight);
 	lcf=(pixelWidth+pixelHeight)/2; /* ---> add here the side size of 1 pixel in the new calibrated units (e.g. lcf=5, if 1 pixels is 5mm) <--- */
 	/* create the dialog prompt */
-	Dialog.create("Choose Iterations");
-		Dialog.addNumber("No. of expansion touch count columns to be listed in table:", 10, 0, 3, " Each iteration = " + pixelWidth + " " + unit);
-		Dialog.addNumber("Limit total number of expansions (255 max)?", 255, 0, 3, " 255 expansions = " + 255 * pixelWidth + " " + unit);
+	Dialog.create("Choose Iterations and Watershed Correction");
+		Dialog.addNumber("No. of expansion touch count columns in Results Table:", columnSuggest, 0, 3, " Each iteration = " + pixelWidth + " " + unit);
+		Dialog.addNumber("Maximum number of pixel expansions (" + iterationLimit + " max):", iterationLimit, 0, 3, " " + iterationLimit + " expansions = " + iterationLimit * pixelWidth + " " + unit);
+		Dialog.setInsets(-2, 70, 10);
+		Dialog.addMessage("Important: There needs to be a background border that is greater than this\nexpansion limit for the ImageJ-enlarge command used here to work properly.");
+		Dialog.addCheckbox("Remove initial pixel separation (apply for Watershed separated objects).", false);
+		Dialog.setInsets(-2, 30, 0);
+		Dialog.addMessage("If checked the 1st pixel separation will be assumed to be zero\nassuming they were originally joined before separation.");
 	Dialog.show;	
 		expansionsListed = Dialog.getNumber; /* optional number of expansions displayed in the table (you do not have to list any if the min dist is all you want */
 		maxExpansions = Dialog.getNumber; /* put a limit of how many expansions before quitting NOTE: the maximum is 255 */
-	maxExpansions = minOf(maxExpansions, 255); /* There is a limit of 255 */	
+		wCorr = Dialog.getCheckbox;
+	maxExpansions = minOf(maxExpansions, iterationLimit); /* Enforce sensible iteration limit */	
 	createLabeledImage();		/* now create labeling image using rois */
 	roiOriginalCount = roiManager("count");
 	minDistArray = newArray(roiOriginalCount);
@@ -50,8 +59,10 @@
 		roiManager("select", i);
 		Roi.getBounds(Rx, Ry, Rwidth, Rheight);
 		minDistArray[i] = -1; /* sets array value so that 1st true entry is flagged */
+		if (wCorr) jStart=2;
+		else jStart=1;
 		/* expand roi to include touching objects */
-		for (j=2 ; j<maxExpansions; j++) { /* first expansion is just 1 pixel boundary (assuming watershed separation) so start at 2 */
+		for (j=jStart ; j<maxExpansions; j++) { /*  if selected above first expansion is just 1 pixel boundary (assuming watershed separation) so start at 2 */
 			selectWindow("Labeled");
 			roiManager("select", i);
 			run("Enlarge...", "enlarge=[j]");
@@ -69,11 +80,13 @@
 				else k = nBins;  /* end gray counting loop on first empty histogram value - no more gray columns */
 			}
 			ProxCount = GrayCount - 2; /* Correct for background and original object */
-			Separation = lcf*(j-2); /* only the selected object is expanded so this does not have to be corrected for adjacent expansion */
+			if (wCorr & j==2) Separation = 0; /* for Watershed separated, 1 pixel separation is assumed to be zero*/
+			else Separation = lcf*(j-1); /* only the selected object is expanded so this does not have to be corrected for adjacent expansion */
 			if (ProxCount>0 && minDistArray[i]==-1) minDistArray[i] = Separation; /* first non-zero proximity count defines min dist */
 			if (lcf>1 && lcf<10) Separation = d2s(Separation, 1) ;
 			if (lcf>=10) Separation = d2s(Separation, 0);
-			if (j==2) setResult("Touch.N.", i, ProxCount);
+			if (wCorr && j==2) setResult("Touch.N.", i, ProxCount); /* For Watershed separated */
+			if (!wCorr && j==1) setResult("Touch.N.", i, ProxCount);
 			else if (lcf==1) {
 				if(j<expansionsListed+3) setResult("TN+" + Separation + "\(px\)", i, ProxCount);
 				if(minDistArray[i]>-1) {
@@ -159,6 +172,7 @@
 			}
 		}
 		return pluginCheck;
+	}
 	function checkForRoiManager() {
 		/* v161109 adds the return of the updated ROI count and also adds dialog if there are already entries just in case . . */
 		nROIs = roiManager("count");
@@ -184,7 +198,7 @@
 		}
 		return roiManager("count"); /* returns the new count of entries */
 	}
-	function checkForUnits() {  /* 
+	function checkForUnits() {
 		/* v161108 (adds inches to possible reasons for checking calibration)
 		*/
 		getPixelSize(unit, pixelWidth, pixelHeight);

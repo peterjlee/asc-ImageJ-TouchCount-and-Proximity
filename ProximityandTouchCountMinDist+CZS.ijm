@@ -2,22 +2,26 @@
 	Uniqueness is guaranteed by labeling each roi with a different grayscale that matches the roi number
 	Each ROI defined by an original object is epanded in pixel increments and the number of enclosed gray shades defines the number of objects now within that expansion
 	Uses histogram macro functions so that no additional particle analysis is required.
-	6/9/2016 Peter J. Lee (NHMFL)
-	This version: v161108 adds a column for the minimum distance between each object and its closest neighbor
+	Peter J. Lee (NHMFL)
+	v161108 adds a column for the minimum distance between each object and its closest neighbor
 	This version also has the CS SmartSEM function
+	v161109 adds check for edge objects
+	v170131 this version defaults to no correction for prior Watershed correction but provides option to enable it.	
 */
+	requires("1.47r"); /* not sure of the actual latest working version byt 1.45 definitely doesn't work */
 	saveSettings(); /* To restore settings at the end */
 	/*   ('.')  ('.')   Black objects on white background settings   ('.')   ('.')   */	
 	/* Set options for black objects on white background as this works better for publications */
 	run("Options...", "iterations=1 white count=1"); /* set white background */
 	run("Colors...", "foreground=black background=white selection=yellow"); /* set colors */
 	setOption("BlackBackground", false);
-	run("Appearance...", " "); /* do not use Inverting LUT */
+	run("Appearance...", " "); /* do not use Inverting LUT - this does not help if the image already has one */
 	/*	The above should be the defaults but this makes sure (black particles on a white background)
 		http://imagejdocu.tudor.lu/doku.php?id=faq:technical:how_do_i_set_up_imagej_to_deal_with_white_particles_on_a_black_background_by_default
 	*/
 	t = getTitle();
 	binaryCheck(t);
+	if (removeEdgeObjects() && roiManager("count")!=0) roiManager("reset"); /* macro does not make much sense if there are edge objects but perhaps they are not included in ROI list (you can cancel out of this). if the object removal routine is run it will also reset the ROI Manager list if it already contains entries */
 	checkForRoiManager();
 	start = getTime(); /* start timer after last requester for debugging */
 	setBatchMode(true);
@@ -28,19 +32,27 @@
 	imageHeight = getHeight();
 	imageDims = (imageWidth + imageHeight);
 	checkForUnits();
+	iterationLimit = floor(minOf(255, (minOf(imageWidth, imageHeight))/2));
+	columnSuggest = minOf(10, iterationLimit);
 	getPixelSize(unit, pixelWidth, pixelHeight);
 	lcf=(pixelWidth+pixelHeight)/2; /* ---> add here the side size of 1 pixel in the new calibrated units (e.g. lcf=5, if 1 pixels is 5mm) <--- */
 	/* create the dialog prompt */
-	Dialog.create("Choose Iterations");
-		Dialog.addNumber("No. of expansion touch count columns to be listed in table:", 10, 0, 3, " Each iteration = " + pixelWidth + " " + unit);
-		Dialog.addNumber("Limit total number of expansions (255 max)?", 255, 0, 3, " 255 expansions = " + 255 * pixelWidth + " " + unit);
+	Dialog.create("Choose Iterations and Watershed Correction");
+		Dialog.addNumber("No. of expansion touch count columns in Results Table:", columnSuggest, 0, 3, " Each iteration = " + pixelWidth + " " + unit);
+		Dialog.addNumber("Maximum number of pixel expansions (" + iterationLimit + " max):", iterationLimit, 0, 3, " " + iterationLimit + " expansions = " + iterationLimit * pixelWidth + " " + unit);
+		Dialog.setInsets(-2, 70, 10);
+		Dialog.addMessage("Important: There needs to be a background border that is greater than this\nexpansion limit for the ImageJ-enlarge command used here to work properly.");
+		Dialog.addCheckbox("Remove initial pixel separation (apply for Watershed separated objects).", false);
+		Dialog.setInsets(-2, 30, 0);
+		Dialog.addMessage("If checked the 1st pixel separation will be assumed to be zero\nassuming they were originally joined before separation.");
 	Dialog.show;	
 		expansionsListed = Dialog.getNumber; /* optional number of expansions displayed in the table (you do not have to list any if the min dist is all you want */
 		maxExpansions = Dialog.getNumber; /* put a limit of how many expansions before quitting NOTE: the maximum is 255 */
-	maxExpansions = minOf(maxExpansions, 255); /* There is a limit of 255 */	
+		wCorr = Dialog.getCheckbox;
+	maxExpansions = minOf(maxExpansions, iterationLimit); /* Enforce sensible iteration limit */	
 
-	/* now create labeling image using rois */
-	createLabeledImage();
+	createLabeledImage();		/* now create labeling image using rois */
+
 	roiOriginalCount = roiManager("count");
 	minDistArray = newArray(roiOriginalCount);
 	showStatus("Looping through all " + roiOriginalCount + " objects for touching and proximity neighbors . . .");
@@ -49,9 +61,11 @@
 		selectWindow("Labeled");
 		roiManager("select", i);
 		Roi.getBounds(Rx, Ry, Rwidth, Rheight);
-		minDistArray[i] = -1;
+		minDistArray[i] = -1; /* sets array value so that 1st true entry is flagged */
+		if (wCorr) jStart=2;
+		else jStart=1;
 		/* expand roi to include touching objects */
-		for (j=2 ; j<maxExpansions; j++) { /* first expansion is just 1 pixel boundary so start at 2 */
+		for (j=jStart ; j<maxExpansions; j++) { /*  if selected above first expansion is just 1 pixel boundary (assuming watershed separation) so start at 2 */
 			selectWindow("Labeled");
 			roiManager("select", i);
 			run("Enlarge...", "enlarge=[j]");
@@ -69,11 +83,13 @@
 				else k = nBins;  /* end gray counting loop on first empty histogram value - no more gray columns */
 			}
 			ProxCount = GrayCount - 2; /* Correct for background and original object */
-			Separation = lcf*(j-2); /* only the selected object is expanded so this does not have to be corrected for adjacent expansion */
+			if (wCorr & j==2) Separation = 0; /* for Watershed separated, 1 pixel separation is assumed to be zero*/
+			else Separation = lcf*(j-1); /* only the selected object is expanded so this does not have to be corrected for adjacent expansion */
 			if (ProxCount>0 && minDistArray[i]==-1) minDistArray[i] = Separation; /* first non-zero proximity count defines min dist */
 			if (lcf>1 && lcf<10) Separation = d2s(Separation, 1) ;
 			if (lcf>=10) Separation = d2s(Separation, 0);
-			if (j==2) setResult("Touch.N.", i, ProxCount);
+			if (wCorr && j==2) setResult("Touch.N.", i, ProxCount); /* For Watershed separated */
+			if (!wCorr && j==1) setResult("Touch.N.", i, ProxCount);
 			else if (lcf==1) {
 				if(j<expansionsListed+3) setResult("TN+" + Separation + "\(px\)", i, ProxCount);
 				if(minDistArray[i]>-1) {
@@ -161,12 +177,17 @@
 		return pluginCheck;
 	}
 	function checkForRoiManager() {
+		/* v161109 adds the return of the updated ROI count and also adds dialog if there are already entries just in case . . */
 		nROIs = roiManager("count");
-		nRES = nResults;
-		if (nROIs==0)  {
-			Dialog.create("No ROI");
-			Dialog.addCheckbox("Run Analyze-particles to generate roiManager values?", true);
-			Dialog.addMessage("This macro requires that all objects have been loaded into the roi manager.\n \nThere are   " + nRES +"   results.\nThere are   " + nROIs +"   ROIs.");
+		nRES = nResults; /* not really needed except to provide useful information below */
+
+		if (nROIs==0) runAnalyze = true;
+		else runAnalyze = getBoolean("There are already " + nROIs + " in the ROI manager; do you want to clear the ROI manager and reanalyze?");
+		if (runAnalyze) {
+			roiManager("reset");
+			Dialog.create("Analysis check");
+			Dialog.addCheckbox("Run Analyze-particles to generate new roiManager values?", true);
+			Dialog.addMessage("This macro requires that all objects have been loaded into the roi manager.\n \nThere are still " + nRES +" results.\nThe ROI list has, however, been cleared (to avoid accidental reuse).");
 			Dialog.show();
 			analyzeNow = Dialog.getCheckbox();
 			if (analyzeNow) {
@@ -179,6 +200,7 @@
 			}
 			else restoreExit();
 		}
+		return roiManager("count"); /* returns the new count of entries */
 	}
 	function checkForUnits() {
 		/* v161108 (adds inches to possible reasons for checking calibration)
@@ -231,11 +253,80 @@
 			fill(); /* This only only works for 32-bit images so hopefully it is not a bug */
 		}
 	}
+	function removeEdgeObjects(){
+	/*	Remove black edge objects without using analyze particles
+	Peter J. Lee  National High Magnetic Field Laboratory
+	Requies the versatile wand tool: https://imagej.nih.gov/ij/plugins/versatile-wand-tool/index.html by Michael Schmid
+	as built in wand does not select edge objects
+	This version v161109
+	*/
+		if (!checkForPlugin("Versatile_Wand_Tool.java") && !checkForPlugin("versatile_wand_tool.jar")) exit("Versatile want tool required");
+		run("Select None");
+		imageWidth = getWidth(); imageHeight = getHeight();
+		makeRectangle(1, 1, imageWidth-2, imageHeight-2);
+		run("Make Inverse");
+		getStatistics(null, null, borderMin, borderMax);
+		run("Select None");
+		removeObjects = false;
+		if(borderMin!=borderMax) {
+			removeObjects = getBoolean("There appear to be edge objects; do you want to remove them?");
+			if (removeObjects) {
+				if (is("Inverting LUT")) { /* at least this should resolve any confusion */
+					run("Invert LUT");
+					run("Invert");
+				}
+				imageHeight2 = getHeight()+4; imageWidth2 = getWidth()+4;
+				originalBGCol = getValue("color.background");
+				if (originalBGCol!=0) setBackgroundColor(0);
+				run("Canvas Size...", "width=[imageWidth2] height=[imageHeight2] position=Center");
+				call("Versatile_Wand_Tool.doWand", 1, 1, 0, "8-connected");
+				run("Invert");
+				run("Make Inverse");
+				run("Crop");
+				run("Select None");
+				if (originalBGCol!=0) setBackgroundColor(originalBGCol); /* return background to original color */
+			}
+		}
+		showStatus("Remove_Edge_Objects function complete");
+		return removeObjects;
+	}
 	function restoreExit(message){ /* clean up before aborting macro then exit */
 		restoreSettings(); /* clean up before exiting */
 		setBatchMode("exit & display"); /* not sure if this does anything useful if exiting gracefully but otherwise harmless */
 		exit(message);
 	}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 	function setScaleFromCZSemHeader() {
 	/*	This very simple function sets the scale for SEM images taken with the Carl Zeiss SmartSEM program. It requires the tiff_tags plugin written by Joachim Wesner. It can be downloaded from http://rsbweb.nih.gov/ij/plugins/tiff-tags.html
 	 There is an example image available at http://rsbweb.nih.gov/ij/images/SmartSEMSample.tif

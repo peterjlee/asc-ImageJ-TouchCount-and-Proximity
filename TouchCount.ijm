@@ -1,10 +1,9 @@
-//	ImageJ Macro to count the number of uniqe objects touching the each object
-//	Uniqueness is guaranteed by G. Landini's binary labeling plugin (part of "Morphology" package
-//	Uses histogram macro functions so that no additional particle analysis is required.
-//	5/31/2016 10:50 AM Peter J. Lee (NHMFL) 
-
-	// setBatchMode(true); //batch mode on
-	
+/*	ImageJ Macro to count the number of uniqe objects touching the each object
+	Uniqueness is guaranteed by G. Landini's binary labeling plugin (part of "Morphology" package
+	Uses histogram macro functions so that no additional particle analysis is required.
+	Assumes that touching objects have been separated by one pixel.
+	5/31/2016 10:50 AM Peter J. Lee (NHMFL) 
+*/
 	start = getTime(); // start timer after last requester for debugging
 	setBatchMode(true);
 	saveSettings(); /* To restore settings at the end */
