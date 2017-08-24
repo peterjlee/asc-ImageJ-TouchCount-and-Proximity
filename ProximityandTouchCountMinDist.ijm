@@ -1,11 +1,12 @@
-/*	ImageJ Macro to count the number of unique objects touching the each object
-	Uniqueness is guaranteed by labeling each roi with a different grayscale that matches the roi number
+/*	ImageJ Macro to count the number of unique objects touching the each object.
+	Uniqueness is guaranteed by labeling each roi with a different grayscale that matches the roi number.
 	Each ROI defined by an original object is epanded in pixel increments and the number of enclosed gray shades defines the number of objects now within that expansion
 	Uses histogram macro functions so that no additional particle analysis is required.
-	Peter J. Lee (NHMFL)
-	v161108 adds a column for the minimum distance between each object and its closest neighbor
-	v161109 adds check for edge objects
+	Peter J. Lee (NHMFL).
+	v161108 adds a column for the minimum distance between each object and its closest neighbor.
+	v161109 adds check for edge objects.
 	v170131 this version defaults to no correction for prior Watershed correction but provides option to enable it.
+	v170824 changed to 16-bit label.
 */
 	requires("1.47r"); /* not sure of the actual latest working version byt 1.45 definitely doesn't work */
 	saveSettings(); /* To restore settings at the end */
@@ -22,16 +23,14 @@
 	binaryCheck(t);
 	if (removeEdgeObjects() && roiManager("count")!=0) roiManager("reset"); /* macro does not make much sense if there are edge objects but perhaps they are not included in ROI list (you can cancel out of this). if the object removal routine is run it will also reset the ROI Manager list if it already contains entries */
 	checkForRoiManager();
-	start = getTime(); /* start timer after last requester for debugging */
-	setBatchMode(true);
-		
+	
 	run("Options...", "count=1 do=Nothing"); /* The binary count setting is set to "1" for consistent outlines */
-
+	
 	imageWidth = getWidth();
 	imageHeight = getHeight();
 	imageDims = (imageWidth + imageHeight);
 	checkForUnits();
-	iterationLimit = floor(minOf(255, (minOf(imageWidth, imageHeight))/2));
+	iterationLimit = floor(minOf(255, (maxOf(imageWidth, imageHeight))/2));
 	columnSuggest = minOf(10, iterationLimit);
 	getPixelSize(unit, pixelWidth, pixelHeight);
 	lcf=(pixelWidth+pixelHeight)/2; /* ---> add here the side size of 1 pixel in the new calibrated units (e.g. lcf=5, if 1 pixels is 5mm) <--- */
@@ -46,12 +45,21 @@
 		Dialog.addMessage("If checked the 1st pixel separation will be assumed to be zero\nassuming they were originally joined before separation.");
 	Dialog.show;	
 		expansionsListed = Dialog.getNumber; /* optional number of expansions displayed in the table (you do not have to list any if the min dist is all you want */
-		maxExpansions = Dialog.getNumber; /* put a limit of how many expansions before quitting NOTE: the maximum is 255 */
+		maxExpansionsD = Dialog.getNumber; /* put a limit of how many expansions before quitting NOTE: the maximum is 255 */
 		wCorr = Dialog.getCheckbox;
-	maxExpansions = minOf(maxExpansions, iterationLimit); /* Enforce sensible iteration limit */	
+	print("-----\n\n");
+	print("Proximity Count macro");
+	print("Macro path: " + getInfo("macro.filepath"));
+	print("Image used for count: " + t);
+	print("Original magnification scale factor used = " + lcf + " with units: " + unit);
+	print("Note that separations measured this way are only approximate for large separations.");
+	maxExpansions = minOf(maxExpansionsD, iterationLimit); /* Enforce sensible iteration limit */	
+	print("Maximum expansions requested = " + maxExpansionsD + " limited to " + maxExpansions + " or limited by " + expansionsListed + " columns requested in the Results table.");
 	createLabeledImage();		/* now create labeling image using rois */
 	roiOriginalCount = roiManager("count");
 	minDistArray = newArray(roiOriginalCount);
+	start = getTime(); /* start timer after last requester for debugging */
+	setBatchMode(true);
 	showStatus("Looping through all " + roiOriginalCount + " objects for touching and proximity neighbors . . .");
 	for (i=0 ; i<roiOriginalCount; i++) {
 		showProgress(-i, roiManager("count"));
@@ -108,12 +116,6 @@
 		}
 	}
 	closeImageByTitle("Labeled");
-	print("-----\n\n");
-	print("Proximity Count macro");
-	print("Macro path: " + getInfo("macro.filepath"));
-	print("Image used for count: " + t);
-	print("Original magnification scale factor used = " + lcf + " with units: " + unit);
-	print("Note that separations measured this way are only approximate for large separations.");
 	print("Run time = " + (getTime()-start)/1000 + "s");
 	print("-----\n\n");
 	restoreSettings();
@@ -211,18 +213,21 @@
 		}
 	}
 	function closeImageByTitle(windowTitle) {  /* cannot be used with tables */
-        if (isOpen(windowTitle)) {
+		if (isOpen(windowTitle)) {
 		selectWindow(windowTitle);
-        close();
+		close();
 		}
 	}
 	function createLabeledImage() {
-		newImage("Labeled", "32-bit black", imageWidth, imageHeight, 1);
+		/* v170818 */
+		newImage("Labeled", "16-bit black", imageWidth, imageHeight, 1);
+		if (roiManager("count")>=65536) restoreExit("The labeling function is limited to 65536 objects");
 		for (i=0 ; i<roiManager("count"); i++) {
 			roiManager("select", i);
-			setColor(1+i);
-			fill(); /* This only only works for 32-bit images so hopefully it is not a bug */
+			labelValue = i+1;
+			run("Add...", "value=[labelValue]");
 		}
+		run("Select None");
 	}
 	function removeEdgeObjects(){
 	/*	Remove black edge objects without using analyze particles
