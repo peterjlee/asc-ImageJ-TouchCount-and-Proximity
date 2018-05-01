@@ -1,6 +1,6 @@
 /*	ImageJ Macro to count the number of unique objects touching the each object
 	Uniqueness is guaranteed by labeling each roi with a different grayscale that matches the roi number.
-	Each ROI defined by an original object is epanded in pixel increments and the number of enclosed gray shades defines the number of objects now within that expansion
+	Each ROI defined by an original object is expanded in pixel increments and the number of enclosed gray shades defines the number of objects now within that expansion
 	Uses histogram macro functions so that no additional particle analysis is required.
 	Peter J. Lee (NHMFL).
 	v161108 adds a column for the minimum distance between each object and its closest neighbor.
@@ -15,8 +15,8 @@
 	saveSettings(); /* To restore settings at the end */
 	/*   ('.')  ('.')   Black objects on white background settings   ('.')   ('.')   */	
 	/* Set options for black objects on white background as this works better for publications */
-	run("Options...", "iterations=1 white count=1"); /* set white background */
-	run("Colors...", "foreground=black background=white selection=yellow"); /* set colors */
+	run("Options...", "iterations=1 white count=1"); /* Set the background to white */
+	run("Colors...", "foreground=black background=white selection=yellow"); /* Set the preferred colors for these macros */
 	setOption("BlackBackground", false);
 	run("Appearance...", " "); /* do not use Inverting LUT - this does not help if the image already has one */
 	/*	The above should be the defaults but this makes sure (black particles on a white background)
@@ -130,9 +130,9 @@
 	showStatus("Macro Finished: " + roiManager("count") + " objects analyzed in " + (getTime()-start)/1000 + "s.");
 	beep(); wait(300); beep(); wait(300); beep();
 	/*
-		( 8(|)	( 8(|)	All ASC Functions	@@@@@:-)	@@@@@:-)
+		( 8(|)	( 8(|)	ASC Functions	@@@@@:-)	@@@@@:-)
 	*/
-	function binaryCheck(windowTitle) { /* for black objects on white background */
+	function binaryCheck(windowTitle) { /* For black objects on a white background */
 		selectWindow(windowTitle);
 		if (is("binary")==0) run("8-bit");
 		/* Quick-n-dirty threshold if not previously thresholded */
@@ -192,20 +192,20 @@
 			roiManager("reset");
 			Dialog.create("Analysis check");
 			Dialog.addCheckbox("Run Analyze-particles to generate new roiManager values?", true);
-			Dialog.addMessage("This macro requires that all objects have been loaded into the roi manager.\n \nThere are still " + nRES +" results.\nThe ROI list has, however, been cleared (to avoid accidental reuse).");
+			Dialog.addMessage("This macro requires that all objects have been loaded into the ROI manager.\n \nThere are still " + nRES +" results.\nThe ROI list has, however, been cleared (to avoid accidental reuse).");
 			Dialog.show();
 			analyzeNow = Dialog.getCheckbox();
 			if (analyzeNow) {
 				setOption("BlackBackground", false);
 				if (nResults==0)
 					run("Analyze Particles...", "display add");
-				else run("Analyze Particles..."); /* let user select settings */
+				else run("Analyze Particles..."); /* Let user select settings */
 				if (nResults!=roiManager("count"))
 					restoreExit("Results and ROI Manager counts do not match!");
 			}
 			else restoreExit();
 		}
-		return roiManager("count"); /* returns the new count of entries */
+		return roiManager("count"); /* Returns the new count of entries */
 	}
 	function checkForUnits() {
 		/* v161108 (adds inches to possible reasons for checking calibration)
@@ -220,13 +220,13 @@
 				Dialog.addCheckbox("Unit asymmetry, pixel units or dpi remnants; do you want to try and import scale for CZ SEM tag?", true);
 				Dialog.show();
 				setCZScale = Dialog.getCheckbox;
-				if (setCZScale) { /* based in macro here: https://rsb.info.nih.gov/ij/macros/SetScaleFromTiffTag.txt */
+				if (setCZScale) { /* Based on the macro here: https://rsb.info.nih.gov/ij/macros/SetScaleFromTiffTag.txt */
 					setScaleFromCZSemHeader();
 					getPixelSize(unit, pixelWidth, pixelHeight);
 					if (pixelWidth!=pixelHeight || pixelWidth==1 || unit=="") setCZScale=false;
 				}
 				if(!setCZScale) {
-					Dialog.create("No Units Still");
+					Dialog.create("Still no standard units");
 					Dialog.addCheckbox("pixelWidth = " + pixelWidth + ": Do you want to define units for this image?", true);
 					Dialog.show();
 					setScale = Dialog.getCheckbox;
@@ -235,7 +235,7 @@
 				}
 			}
 			else if (pixelWidth!=pixelHeight || pixelWidth==1 || unit=="" || unit=="inches"){
-				Dialog.create("No Sensible Units Still");
+				Dialog.create("Still no standard units");
 				Dialog.addCheckbox("Unit asymmetry, pixel units or dpi remnants; do you want to define units for this image?", true);
 				Dialog.show();
 				setScale = Dialog.getCheckbox;
@@ -244,7 +244,7 @@
 			}
 		}
 	}
-	function closeImageByTitle(windowTitle) {  /* cannot be used with tables */
+	function closeImageByTitle(windowTitle) {  /* Cannot be used with tables */
 		if (isOpen(windowTitle)) {
 		selectWindow(windowTitle);
 		close();
@@ -262,13 +262,13 @@
 		run("Select None");
 	}
 	function removeEdgeObjects(){
-	/*	Remove black edge objects without using analyze particles
+	/*	Remove black edge objects without using Analyze Particles
 	Peter J. Lee  National High Magnetic Field Laboratory
-	Requies the versatile wand tool: https://imagej.nih.gov/ij/plugins/versatile-wand-tool/index.html by Michael Schmid
+	requires the versatile wand tool: https://imagej.nih.gov/ij/plugins/versatile-wand-tool/index.html by Michael Schmid
 	as built in wand does not select edge objects
 	This version v161109
 	*/
-		if (!checkForPlugin("Versatile_Wand_Tool.java") && !checkForPlugin("versatile_wand_tool.jar")) exit("Versatile want tool required");
+		if (!checkForPlugin("Versatile_Wand_Tool.java") && !checkForPlugin("versatile_wand_tool.jar")) exit("Versatile Wand Tool required for this macro");
 		run("Select None");
 		imageWidth = getWidth(); imageHeight = getHeight();
 		makeRectangle(1, 1, imageWidth-2, imageHeight-2);
@@ -279,7 +279,7 @@
 		if(borderMin!=borderMax) {
 			removeObjects = getBoolean("There appear to be edge objects; do you want to remove them?");
 			if (removeObjects) {
-				if (is("Inverting LUT")) { /* at least this should resolve any confusion */
+				if (is("Inverting LUT")) { /* At least this should resolve any visual confusion */
 					run("Invert LUT");
 					run("Invert");
 				}
@@ -292,16 +292,16 @@
 				run("Make Inverse");
 				run("Crop");
 				run("Select None");
-				if (originalBGCol!=0) setBackgroundColor(originalBGCol); /* return background to original color */
+				if (originalBGCol!=0) setBackgroundColor(originalBGCol); /* Return background to original color */
 			}
 		}
 		showStatus("Remove_Edge_Objects function complete");
 		return removeObjects;
 	}
-	function restoreExit(message){ /* clean up before aborting macro then exit */
+	function restoreExit(message){ /* Make a clean exit from a macro, restoring previous settings */
 		/* 9/9/2017 added Garbage clean up suggested by Luc LaLonde - LBNL */
-		restoreSettings(); /* clean up before exiting */
-		setBatchMode("exit & display"); /* not sure if this does anything useful if exiting gracefully but otherwise harmless */
+		restoreSettings(); /* Restore previous settings before exiting */
+		setBatchMode("exit & display"); /* Probably not necessary if exiting gracefully but otherwise harmless */
 		run("Collect Garbage"); 
 		exit(message);
 	}
@@ -317,8 +317,8 @@
 	if (path=="") exit ("path not available");
 	name = getInfo("image.filename");
 	if (name=="") exit ("name not available");
-	if (!matches(getInfo("image.filename"),".*[tT][iI][fF].*")) exit("Not TIFF file");
-	if (!checkForPlugin("tiff_tags.jar")) exit("Not TIFF file");
+	if (!matches(getInfo("image.filename"),".*[tT][iI][fF].*")) exit("Not a TIFF file \(original Zeiss TIFF file required\)");
+	if (!checkForPlugin("tiff_tags.jar")) exit("Not a TIFF file \(original Zeiss TIFF file required\)");
 	path = path + name;
 	/* 
 	Gets the tag, and parses it to get the pixel size information */
