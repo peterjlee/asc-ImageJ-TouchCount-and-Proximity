@@ -10,6 +10,7 @@
 	v170909 Added garbage clean up as suggested by Luc LaLonde at LBNL.
 	v170914 Minimum separation now set to zero for 1st iteration touches if Watershed option is selected.
 	v180831 Corrected missing pixel statement in enlargement.
+	v190725 Updates all ASC functions.
 */
 	requires("1.47r"); /* not sure of the actual latest working version byt 1.45 definitely doesn't work */
 	saveSettings(); /* To restore settings at the end */
@@ -18,20 +19,16 @@
 	run("Options...", "iterations=1 white count=1"); /* Set the background to white */
 	run("Colors...", "foreground=black background=white selection=yellow"); /* Set the preferred colors for these macros */
 	setOption("BlackBackground", false);
-	run("Appearance...", " "); /* do not use Inverting LUT - this does not help if the image already has one */
-	/*	The above should be the defaults but this makes sure (black particles on a white background)
-		http://imagejdocu.tudor.lu/doku.php?id=faq:technical:how_do_i_set_up_imagej_to_deal_with_white_particles_on_a_black_background_by_default
+	run("Appearance...", " "); if(is("Inverting LUT")) run("Invert LUT"); /* do not use Inverting LUT */
+	/*	The above should be the defaults but this makes sure (black particles on a white background) http://imagejdocu.tudor.lu/doku.php?id=faq:technical:how_do_i_set_up_imagej_to_deal_with_white_particles_on_a_black_background_by_default
 	*/
 	t = getTitle();
 	binaryCheck(t);
 	if (removeEdgeObjects() && roiManager("count")!=0) roiManager("reset"); /* macro does not make much sense if there are edge objects but perhaps they are not included in ROI list (you can cancel out of this). if the object removal routine is run it will also reset the ROI Manager list if it already contains entries */
 	checkForRoiManager();
-	
 	run("Options...", "count=1 do=Nothing"); /* The binary count setting is set to "1" for consistent outlines */
-	
 	imageWidth = getWidth();
 	imageHeight = getHeight();
-	imageDims = (imageWidth + imageHeight);
 	checkForUnits();
 	iterationLimit = floor(minOf(255, (maxOf(imageWidth, imageHeight))/2));
 	columnSuggest = minOf(10, iterationLimit);
@@ -59,7 +56,7 @@
 	maxExpansions = minOf(maxExpansionsD, iterationLimit); /* Enforce sensible iteration limit */	
 	print("Maximum expansions requested = " + maxExpansionsD + " limited to " + maxExpansions + " or limited by " + expansionsListed + " columns requested in the Results table.");
 	if (wCorr) print("Initial single pixel separation treated as touching i.e. Watershed separated.");
-	createLabeledImage();		/* now create labeling image using rois */
+	createLabeledImage();		/* now create labeling image using ROIs */
 	roiOriginalCount = roiManager("count");
 	minDistArray = newArray(roiOriginalCount);
 	start = getTime(); /* start timer after last requester for debugging */
@@ -133,27 +130,50 @@
 		( 8(|)	( 8(|)	ASC Functions	@@@@@:-)	@@@@@:-)
 	*/
 	function binaryCheck(windowTitle) { /* For black objects on a white background */
+		/* v180601 added choice to invert or not 
+		v180907 added choice to revert to the true LUT, changed border pixel check to array stats
+		v190725 Changed to make binary
+		*/
 		selectWindow(windowTitle);
-		if (is("binary")==0) run("8-bit");
+		if (!is("binary")) run("8-bit");
 		/* Quick-n-dirty threshold if not previously thresholded */
 		getThreshold(t1,t2); 
 		if (t1==-1)  {
 			run("8-bit");
-			setThreshold(0, 128);
-			setOption("BlackBackground", true);
-			run("Convert to Mask");
-			run("Invert");
-			}
+			run("Auto Threshold", "method=Default");
+			setOption("BlackBackground", false);
+			run("Make Binary");
+		}
+		if (is("Inverting LUT"))  {
+			trueLUT = getBoolean("The LUT appears to be inverted, do you want the true LUT?", "Yes Please", "No Thanks");
+			if (trueLUT) run("Invert LUT");
+		}
 		/* Make sure black objects on white background for consistency */
-		if (((getPixel(0, 0))==0 || (getPixel(0, 1))==0 || (getPixel(1, 0))==0 || (getPixel(1, 1))==0))
-			run("Invert"); 
+		cornerPixels = newArray(getPixel(0, 0), getPixel(0, 1), getPixel(1, 0), getPixel(1, 1));
+		Array.getStatistics(cornerPixels, cornerMin, cornerMax, cornerMean, cornerStdDev);
+		if (cornerMax!=cornerMin) restoreExit("Problem with image border: Different pixel intensities at corners");
 		/*	Sometimes the outline procedure will leave a pixel border around the outside - this next step checks for this.
 			i.e. the corner 4 pixels should now be all black, if not, we have a "border issue". */
-		if (((getPixel(0, 0))+(getPixel(0, 1))+(getPixel(1, 0))+(getPixel(1, 1))) != 4*(getPixel(0, 0)) ) 
-				restoreExit("Border Issue"); 	
+		if (cornerMean==0) {
+			inversion = getBoolean("The background appears to have intensity zero, do you want the intensities inverted?", "Yes Please", "No Thanks");
+			if (inversion) run("Invert"); 
+		}
+	}
+	function checkForEdgeObjects(){
+	/*	1st version v190725 */
+		run("Select None");
+		imageWidth = getWidth(); imageHeight = getHeight();
+		makeRectangle(1, 1, imageWidth-2, imageHeight-2);
+		run("Make Inverse");
+		getStatistics(null, null, borderMin, borderMax);
+		run("Select None");
+		if (borderMin!=borderMax) edgeObjects = true;
+		else edgeObjects = false;
+		return edgeObjects;
 	}
 	function checkForPlugin(pluginName) {
-		/* v161102 changed to true-false */
+		/* v161102 changed to true-false
+			v180831 some cleanup */
 		var pluginCheck = false, subFolderCount = 0;
 		if (getDirectory("plugins") == "") restoreExit("Failure to find any plugins!");
 		else pluginDir = getDirectory("plugins");
@@ -168,10 +188,10 @@
 			for (i=0; i<lengthOf(pluginList); i++) {
 				if (endsWith(pluginList[i], "/")) {
 					subFolderList[subFolderCount] = pluginList[i];
-					subFolderCount = subFolderCount +1;
+					subFolderCount += 1;
 				}
 			}
-			subFolderList = Array.slice(subFolderList, 0, subFolderCount);
+			subFolderList = Array.trim(subFolderList, subFolderCount);
 			for (i=0; i<lengthOf(subFolderList); i++) {
 				if (File.exists(pluginDir + subFolderList[i] +  "\\" + pluginName)) {
 					pluginCheck = true;
@@ -183,16 +203,18 @@
 		return pluginCheck;
 	}
 	function checkForRoiManager() {
-		/* v161109 adds the return of the updated ROI count and also adds dialog if there are already entries just in case . . */
+		/* v161109 adds the return of the updated ROI count and also adds dialog if there are already entries just in case . .
+			v180104 only asks about ROIs if there is a mismatch with the results */
 		nROIs = roiManager("count");
-		nRES = nResults; /* not really needed except to provide useful information below */
-		if (nROIs==0) runAnalyze = true;
-		else runAnalyze = getBoolean("There are already " + nROIs + " in the ROI manager; do you want to clear the ROI manager and reanalyze?");
+		nRes = nResults; /* Used to check for ROIs:Results mismatch */
+		if(nROIs==0) runAnalyze = true; /* Assumes that ROIs are required and that is why this function is being called */
+		else if(nROIs!=nRes) runAnalyze = getBoolean("There are " + nRes + " results and " + nROIs + " ROIs; do you want to clear the ROI manager and reanalyze?");
+		else runAnalyze = false;
 		if (runAnalyze) {
 			roiManager("reset");
 			Dialog.create("Analysis check");
 			Dialog.addCheckbox("Run Analyze-particles to generate new roiManager values?", true);
-			Dialog.addMessage("This macro requires that all objects have been loaded into the ROI manager.\n \nThere are still " + nRES +" results.\nThe ROI list has, however, been cleared (to avoid accidental reuse).");
+			Dialog.addMessage("This macro requires that all objects have been loaded into the ROI manager.\n \nThere are   " + nRes +"   results.\nThere are   " + nROIs +"   ROIs.");
 			Dialog.show();
 			analyzeNow = Dialog.getCheckbox();
 			if (analyzeNow) {
@@ -203,55 +225,58 @@
 				if (nResults!=roiManager("count"))
 					restoreExit("Results and ROI Manager counts do not match!");
 			}
-			else restoreExit();
+			else restoreExit("Goodbye, your previous setting will be restored.");
 		}
 		return roiManager("count"); /* Returns the new count of entries */
 	}
-	function checkForUnits() {
+	function checkForUnits() {  /* Generic version 
 		/* v161108 (adds inches to possible reasons for checking calibration)
-		*/
+		 v170914 Radio dialog with more information displayed */
 		getPixelSize(unit, pixelWidth, pixelHeight);
 		if (pixelWidth!=pixelHeight || pixelWidth==1 || unit=="" || unit=="inches"){
-			Dialog.create("No Units");
-			Dialog.addCheckbox("Unit asymmetry, pixel units or dpi remnants; do you want to define units for this image?", true);
+			Dialog.create("Suspicious Units");
+			rescaleChoices = newArray("Define new units for this image", "Use current scale", "Exit this macro");
+			rescaleDialogLabel = "pixelHeight = "+pixelHeight+", pixelWidth = "+pixelWidth+", unit = "+unit+": what would you like to do?";
+			Dialog.addRadioButtonGroup(rescaleDialogLabel, rescaleChoices, 3, 1, rescaleChoices[0]) ;
 			Dialog.show();
-			setScale = Dialog.getCheckbox;
-			if (setScale) run("Set Scale...");
+			rescaleChoice = Dialog.getRadioButton;
+			if (rescaleChoice==rescaleChoices[0]) run("Set Scale...");
+			else if (rescaleChoice==rescaleChoices[2]) restoreExit("Goodbye");
 		}
 	}
 	function closeImageByTitle(windowTitle) {  /* Cannot be used with tables */
-		if (isOpen(windowTitle)) {
-		selectWindow(windowTitle);
-		close();
+		/* v181002 reselects original image at end if open */
+		oIID = getImageID();
+        if (isOpen(windowTitle)) {
+			selectWindow(windowTitle);
+			close();
 		}
+		if (isOpen(oIID)) selectImage(oIID);
 	}
 	function createLabeledImage() {
-		/* v170818 */
-		newImage("Labeled", "16-bit black", imageWidth, imageHeight, 1);
-		if (roiManager("count")>=65536) restoreExit("The labeling function is limited to 65536 objects");
-		for (i=0 ; i<roiManager("count"); i++) {
+		/* v180305 */
+		labels = roiManager("count");
+		if (labels==0) cleanExit("Sorry, this macro labels using ROI Manager objects, try the Landini plugin instead.");
+		if (labels>=65536) cleanExit("The labeling function is limited to 65536 objects");
+		if (labels<=253)	newImage("Labeled", "8-bit black", imageWidth, imageHeight, 1);
+		else newImage("Labeled", "16-bit black", imageWidth, imageHeight, 1);
+		for (i=0 ; i<labels; i++) {
 			roiManager("select", i);
 			labelValue = i+1;
 			run("Add...", "value=[labelValue]");
+			if (nResults==labels) setResult("Label\(Int\)", i, labelValue);
 		}
 		run("Select None");
 	}
 	function removeEdgeObjects(){
 	/*	Remove black edge objects without using Analyze Particles
 	Peter J. Lee  National High Magnetic Field Laboratory
-	requires the versatile wand tool: https://imagej.nih.gov/ij/plugins/versatile-wand-tool/index.html by Michael Schmid
+	Requires the versatile wand tool: https://imagej.nih.gov/ij/plugins/versatile-wand-tool/index.html by Michael Schmid
 	as built in wand does not select edge objects
 	This version v161109
 	*/
 		if (!checkForPlugin("Versatile_Wand_Tool.java") && !checkForPlugin("versatile_wand_tool.jar")) exit("Versatile Wand Tool required for this macro");
-		run("Select None");
-		imageWidth = getWidth(); imageHeight = getHeight();
-		makeRectangle(1, 1, imageWidth-2, imageHeight-2);
-		run("Make Inverse");
-		getStatistics(null, null, borderMin, borderMax);
-		run("Select None");
-		removeObjects = false;
-		if(borderMin!=borderMax) {
+		if (checkForEdgeObjects()) { /* requires checkForEdgeObjectsFunction */
 			removeObjects = getBoolean("There appear to be edge objects; do you want to remove them?");
 			if (removeObjects) {
 				if (is("Inverting LUT")) { /* At least this should resolve any visual confusion */
@@ -270,6 +295,7 @@
 				if (originalBGCol!=0) setBackgroundColor(originalBGCol); /* Return background to original color */
 			}
 		}
+		else removeObjects = false;
 		showStatus("Remove_Edge_Objects function complete");
 		return removeObjects;
 	}
