@@ -2,7 +2,7 @@
 <p>These ImageJ macros (<a href="https://github.com/peterjlee/asc-ImageJ-TouchCount-and-Proximity" Title = "Applied Superconductivity Center Touch Count and Proximity Macro Directory" >link</a>):
  <br>1: Count the number of objects that are touching each other<a href="https://fs.magnet.fsu.edu/~lee/asc/ImageJUtilities/ASC-Macros/LayerThickness/Minimum%20wall%20thickness%20macro_060816.pdf"></a>.
  <br>2: Count the number of objects within successive spacing range increases of 1 pixel.
- <br>3: Reports the minimum separation distance between objects.
+ <br>3: Report the minimum separation distance between objects.
  <br>The TouchCount assumes that all objects have been previously separated by using the watershed tool (i.e.  &quot;touching&quot; objects will be separated by  1 pixel). The count of the number of objects within successive separation increases of 1 pixel converts these separations to the scaled unit if there is one (if just pixels are preferred just remove the scale prior to running the macro). The "CZS" version automatically pulls the scale information from CZS format headers. Note: there needs to be an empty background color border around all the outside objects that is at least as wide as the maximum measured separation.</p>
 
 <p><img src="https://fs.magnet.fsu.edu/~lee/asc/ImageJUtilities/IA_Images/ProximityandTouchCount_Example_mplPlasma_anim573x190.gif" alt="Touch count of each object." width="572" height="190" /></p>
