@@ -10,7 +10,7 @@
 	v170909 Added garbage clean up as suggested by Luc LaLonde at LBNL.
 	v170914 Minimum separation now set to zero for 1st iteration touches if Watershed option is selected.
 	v180831 Corrected missing pixel statement in enlargement.
-	v190725 Updates all ASC functions.
+	v190725 Updates all ASC functions. v191122 Minor tweaks
 */
 	requires("1.47r"); /* not sure of the actual latest working version byt 1.45 definitely doesn't work */
 	saveSettings(); /* To restore settings at the end */
@@ -47,15 +47,15 @@
 		expansionsListed = Dialog.getNumber; /* optional number of expansions displayed in the table (you do not have to list any if the min dist is all you want */
 		maxExpansionsD = Dialog.getNumber; /* put a limit of how many expansions before quitting NOTE: the maximum is 255 */
 		wCorr = Dialog.getCheckbox;
-	print("-----\n\n");
-	print("Proximity Count macro");
-	print("Macro path: " + getInfo("macro.filepath"));
-	print("Image used for count: " + t);
-	print("Original magnification scale factor used = " + lcf + " with units: " + unit);
-	print("Note that separations measured this way are only approximate for large separations.");
+	IJ.log("-----\n\n");
+	IJ.log("Proximity Count macro");
+	IJ.log("Macro path: " + getInfo("macro.filepath"));
+	IJ.log("Image used for count: " + t);
+	IJ.log("Original magnification scale factor used = " + lcf + " with units: " + unit);
+	IJ.log("Note that separations measured this way are only approximate for large separations.");
 	maxExpansions = minOf(maxExpansionsD, iterationLimit); /* Enforce sensible iteration limit */	
-	print("Maximum expansions requested = " + maxExpansionsD + " limited to " + maxExpansions + " or limited by " + expansionsListed + " columns requested in the Results table.");
-	if (wCorr) print("Initial single pixel separation treated as touching i.e. Watershed separated.");
+	IJ.log("Maximum expansions requested = " + maxExpansionsD + " limited to " + maxExpansions + " or limited by " + expansionsListed + " columns requested in the Results table.");
+	if (wCorr) IJ.log("Initial single pixel separation treated as touching i.e. Watershed separated.");
 	createLabeledImage();		/* now create labeling image using ROIs */
 	roiOriginalCount = roiManager("count");
 	minDistArray = newArray(roiOriginalCount);
@@ -70,7 +70,7 @@
 		minDistArray[i] = -1; /* sets array value so that 1st true entry is flagged */
 		if (wCorr) jStart = 2;
 		else jStart = 1;
-		/* expand roi to include touching objects */
+		/* expand ROI to include touching objects */
 		for (j=jStart ; j<maxExpansions; j++) { /*  if selected above first expansion is just 1 pixel boundary (assuming watershed separation) so start at 2 */
 			selectWindow("Labeled");
 			roiManager("select", i);
@@ -119,12 +119,12 @@
 		}
 	}
 	closeImageByTitle("Labeled");
-	print("Run time = " + (getTime()-start)/1000 + "s");
-	print("-----\n\n");
+	IJ.log("Run time = " + (getTime()-start)/1000 + "s");
+	IJ.log("-----\n\n");
 	restoreSettings();
 	setBatchMode("exit & display"); /* exit batch mode */
 	run("Collect Garbage"); 
-	showStatus("Macro Finished: " + roiManager("count") + " objects analyzed in " + (getTime()-start)/1000 + "s.");
+	showStatus("!Proximity Macro Finished: " + roiManager("count") + " objects analyzed in " + (getTime()-start)/1000 + "s.");
 	beep(); wait(300); beep(); wait(300); beep();
 	/*
 		( 8(|)	( 8(|)	ASC Functions	@@@@@:-)	@@@@@:-)
@@ -204,29 +204,58 @@
 	}
 	function checkForRoiManager() {
 		/* v161109 adds the return of the updated ROI count and also adds dialog if there are already entries just in case . .
-			v180104 only asks about ROIs if there is a mismatch with the results */
+			v180104 only asks about ROIs if there is a mismatch with the results
+			v190628 adds option to import saved ROI set */
 		nROIs = roiManager("count");
 		nRes = nResults; /* Used to check for ROIs:Results mismatch */
-		if(nROIs==0) runAnalyze = true; /* Assumes that ROIs are required and that is why this function is being called */
-		else if(nROIs!=nRes) runAnalyze = getBoolean("There are " + nRes + " results and " + nROIs + " ROIs; do you want to clear the ROI manager and reanalyze?");
-		else runAnalyze = false;
-		if (runAnalyze) {
-			roiManager("reset");
-			Dialog.create("Analysis check");
-			Dialog.addCheckbox("Run Analyze-particles to generate new roiManager values?", true);
-			Dialog.addMessage("This macro requires that all objects have been loaded into the ROI manager.\n \nThere are   " + nRes +"   results.\nThere are   " + nROIs +"   ROIs.");
+		if(nROIs==0 || nROIs!=nRes){
+			Dialog.create("ROI options");
+				Dialog.addMessage("This macro requires that all objects have been loaded into the ROI manager.\n \nThere are   " + nRes +"   results.\nThere are   " + nROIs +"   ROIs.\nDo you want to:");
+				if(nROIs==0) Dialog.addCheckbox("Import a saved ROI list",false);
+				else Dialog.addCheckbox("Replace the current ROI list with a saved ROI list",false);
+				if(nRes==0) Dialog.addCheckbox("Import a Results Table \(csv\) file",false);
+				else Dialog.addCheckbox("Clear Results Table and import saved csv",false);
+				Dialog.addCheckbox("Clear ROI list and Results Table and reanalyze \(overrides above selections\)",true);
+				Dialog.addCheckbox("Get me out of here, I am having second thoughts . . .",false);
 			Dialog.show();
-			analyzeNow = Dialog.getCheckbox();
-			if (analyzeNow) {
+				importROI = Dialog.getCheckbox;
+				importResults = Dialog.getCheckbox;
+				runAnalyze = Dialog.getCheckbox;
+				if (Dialog.getCheckbox) restoreExit("Sorry this did not work out for you.");
+			if (runAnalyze) {
+				if (isOpen("ROI Manager"))	roiManager("reset");
 				setOption("BlackBackground", false);
-				if (nResults==0)
-					run("Analyze Particles...", "display add");
-				else run("Analyze Particles..."); /* Let user select settings */
+				if (isOpen("Results")) {
+					selectWindow("Results");
+					run("Close");
+				}
+				run("Analyze Particles..."); /* Let user select settings */
 				if (nResults!=roiManager("count"))
 					restoreExit("Results and ROI Manager counts do not match!");
 			}
-			else restoreExit("Goodbye, your previous setting will be restored.");
+			else {
+				if (importROI) {
+					if (isOpen("ROI Manager"))	roiManager("reset");
+					msg = "Import ROI set \(zip file\), click \"OK\" to continue to file chooser";
+					showMessage(msg);
+					roiManager("Open", "");
+				}
+				if (importResults){
+					if (isOpen("Results")) {
+						selectWindow("Results");
+						run("Close");
+					}
+					msg = "Import Results Table, click \"OK\" to continue to file chooser";
+					showMessage(msg);
+					open("");
+					Table.rename(Table.title, "Results");
+				}
+			}
 		}
+		nROIs = roiManager("count");
+		nRes = nResults; /* Used to check for ROIs:Results mismatch */
+		if(nROIs==0 || nROIs!=nRes)
+			restoreExit("Goodbye, your previous setting will be restored.");
 		return roiManager("count"); /* Returns the new count of entries */
 	}
 	function checkForUnits() {  /* Generic version 
@@ -271,32 +300,36 @@
 	function removeEdgeObjects(){
 	/*	Remove black edge objects without using Analyze Particles
 	Peter J. Lee  National High Magnetic Field Laboratory
-	Requires the versatile wand tool: https://imagej.nih.gov/ij/plugins/versatile-wand-tool/index.html by Michael Schmid
-	as built in wand does not select edge objects
-	This version v161109
+	Requires:
+		The versatile wand tool: https://imagej.nih.gov/ij/plugins/versatile-wand-tool/index.html by Michael Schmid as built in wand does not select edge objects
+		checkForEdgeObjects function
+	Optional: morphology_collection.jar
+	1st version v190604
+	v190605 This version uses Gabriel Landini's morphology plugin if available
+	v190725 Checks for edges first and then returns "true" if edge objects removed
 	*/
-		if (!checkForPlugin("Versatile_Wand_Tool.java") && !checkForPlugin("versatile_wand_tool.jar")) exit("Versatile Wand Tool required for this macro");
 		if (checkForEdgeObjects()) { /* requires checkForEdgeObjectsFunction */
-			removeObjects = getBoolean("There appear to be edge objects; do you want to remove them?");
-			if (removeObjects) {
-				if (is("Inverting LUT")) { /* At least this should resolve any visual confusion */
-					run("Invert LUT");
-					run("Invert");
-				}
-				imageHeight2 = getHeight()+4; imageWidth2 = getWidth()+4;
-				originalBGCol = getValue("color.background");
-				if (originalBGCol!=0) setBackgroundColor(0);
-				run("Canvas Size...", "width=[imageWidth2] height=[imageHeight2] position=Center");
-				call("Versatile_Wand_Tool.doWand", 1, 1, 0, "8-connected");
-				run("Invert");
-				run("Make Inverse");
-				run("Crop");
+			if (checkForPlugin("morphology_collection.jar")) run("BinaryKillBorders ", "top right bottom left");
+			else {
+				if (!checkForPlugin("Versatile_Wand_Tool.java") && !checkForPlugin("versatile_wand_tool.jar") && !checkForPlugin("Versatile_Wand_Tool.jar")) restoreExit("Versatile wand tool required");
 				run("Select None");
-				if (originalBGCol!=0) setBackgroundColor(originalBGCol); /* Return background to original color */
+				originalBGCol = getValue("color.background");
+				print(originalBGCol);
+				cWidth = getWidth()+2; cHeight = getHeight()+2;
+				run("Canvas Size...", "width=&cWidth height=&cHeight position=Center");
+				setColor("black");
+				drawRect(0, 0, cWidth, cHeight);
+				call("Versatile_Wand_Tool.doWand", 0, 0, 0.0, 0.0, 0.0, "8-connected");
+				run("Colors...", "background=white");
+				run("Clear", "slice");
+				setBackgroundColor(originalBGCol); /* Return background to original color */
+				makeRectangle(1, 1, cWidth-2, cHeight-2);
+				run("Crop");
 			}
+			showStatus("Remove_Edge_Objects function complete");
+			removeObjects = true;
 		}
 		else removeObjects = false;
-		showStatus("Remove_Edge_Objects function complete");
 		return removeObjects;
 	}
 	function restoreExit(message){ /* Make a clean exit from a macro, restoring previous settings */
