@@ -7,6 +7,11 @@
 
 <p><img src="https://fs.magnet.fsu.edu/~lee/asc/ImageJUtilities/IA_Images/ProximityandTouchCount_Example_mplPlasma_anim573x190.gif" alt="Touch count of each object." width="572" height="190" /></p>
 
+<h3>Nearest Neighbor Object Separation</h3>
+<p>This macro measures the closest separation between neighboring objects. The minimum spacings are added to the Results table along with the connecting coordinates. The spacing connecting lines can be displayed on the images or animated.</p>
+<p><img src="https://fs.magnet.fsu.edu/~lee/asc/ImageJUtilities/IA_Images/NN-Sep_Lines_Anim_347x183.gif" alt="Touch count of each object." width="347" height="183" /></p>
+
+
 <p><sub><sup>
  <strong>Legal Notice:</strong> <br />
 These macros have been developed to demonstrate the power of the ImageJ macro language and we assume no responsibility whatsoever for its use by other parties, and make no guarantees, expressed or implied, about its quality, reliability, or any other characteristic. On the other hand we hope you do have fun with them without causing harm.
