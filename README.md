@@ -1,4 +1,6 @@
-# asc-ImageJ-TouchCount-and-Proximity
+# asc-ImageJ-TouchCount-and-Proximity macros
+
+<h3>Touch Count and Proximity Macros</h3>
 <p>These ImageJ macros (<a href="https://github.com/peterjlee/asc-ImageJ-TouchCount-and-Proximity" Title = "Applied Superconductivity Center Touch Count and Proximity Macro Directory" >link</a>):
 <br />1: Count the number of objects that are touching each other<a href="https://fs.magnet.fsu.edu/~lee/asc/ImageJUtilities/ASC-Macros/LayerThickness/Minimum%20wall%20thickness%20macro_060816.pdf"></a>.
 <br />2: Count the number of objects within successive spacing range increases of 1 pixel (up to 10 iterations).
