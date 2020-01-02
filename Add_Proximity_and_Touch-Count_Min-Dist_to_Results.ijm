@@ -305,8 +305,9 @@
 		checkForEdgeObjects function
 	Optional: morphology_collection.jar
 	1st version v190604
-	v190605 This version uses Gabriel Landini's morphology plugin if available
-	v190725 Checks for edges first and then returns "true" if edge objects removed
+	v190605 This version uses Gabriel Landini's morphology plugin if available.
+	v190725 Checks for edges first and then returns "true" if edge objects removed.
+	v200102 Removed unnecessary print command.
 	*/
 		if (checkForEdgeObjects()) { /* requires checkForEdgeObjectsFunction */
 			if (checkForPlugin("morphology_collection.jar")) run("BinaryKillBorders ", "top right bottom left");
@@ -314,7 +315,6 @@
 				if (!checkForPlugin("Versatile_Wand_Tool.java") && !checkForPlugin("versatile_wand_tool.jar") && !checkForPlugin("Versatile_Wand_Tool.jar")) restoreExit("Versatile wand tool required");
 				run("Select None");
 				originalBGCol = getValue("color.background");
-				print(originalBGCol);
 				cWidth = getWidth()+2; cHeight = getHeight()+2;
 				run("Canvas Size...", "width=&cWidth height=&cHeight position=Center");
 				setColor("black");
