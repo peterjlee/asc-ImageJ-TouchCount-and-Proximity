@@ -7,11 +7,15 @@
 	v191212: Added legend option.
 	v191220-v200102: Improved legend.
 	v200304 - Added memory flushing component. v200305 added memFlush to restoreExit.
-	v200305 Better optimum sampling guess and a few more memory tweaks but there is still a cumulative and persistent memory leak
+	v200305 Better optimum sampling guess and a few more memory tweaks but there is still a cumulative and persistent memory leak..
+	v200722 Added manual macro label and selection of results table using new function.
+	v201215 Changed to expandable arrays and fixed unexpected skipping of objects.
 */
+	macroL = "Add_NN_ROI_Min-Separation_to_Results_v201215";
 	requires("1.47r"); /* not sure of the actual latest working version but 1.45 definitely doesn't work */
-	run("Collect Garbage");
+	memFlush(200); /* This macro needs all the help it can get */
 	saveSettings(); /* To restore settings at the end */
+	setOption("ExpandableArrays", true); /* In ImageJ 1.53g and later, arrays automatically expand in size as needed */
 	/*   ('.')  ('.')   Black objects on white background settings   ('.')   ('.')   */	
 	/* Set options for black objects on white background as this works better for publications */
 	run("Options...", "iterations=1 white count=1"); /* Set the background to white */
@@ -35,6 +39,7 @@
 	getPixelSize(unit, pixelWidth, pixelHeight);
 	lcf=(pixelWidth+pixelHeight)/2; /* ---> add here the side size of 1 pixel in the new calibrated units (e.g. lcf=5, if 1 pixels is 5mm) <--- */
 	/* create the dialog prompt */
+	selectResultsWindow(); /* allows you to choose from multiple windows */
 	Array.getStatistics(Table.getColumn("Perim."), minPerim, maxPerim, meanPerim, null) ;
 	subSamD = minOf(floor(minPerim/(20*lcf)),floor(dimProd/500000));
 	totalPPx = round(rOIs * meanPerim/lcf);
@@ -42,7 +47,7 @@
 	dLW = maxOf(1,round(imageWidth/1024)); /* default line width */
 	leq = fromCharCode(0x2264);
 	prefsNameKey = "asc.NN.ROI.sep.Prefs.";
-	Dialog.create("Options for Minimum Separation Macro");
+	Dialog.create("Options for: " + macroL);
 		Dialog.addNumber("No. of object distance sets \("+leq+"6\) to be added to Results Table:", minOf(6,rOIs-1), 0, 6,"of " + rOIs + " ROIs");
 		Dialog.addNumber("No. of adjacent objects to included in search:", minOf(12,rOIs-1), 0, 6,"adjacent ROIs");
 		Dialog.addMessage("This brute force approach is a little slow but it can be\nsped up by sub-sampling the perimeter points:");
@@ -107,24 +112,22 @@
 	IJ.log("Original magnification scale factor used = " + lcf + " with units: " + unit);
 	IJ.log("Maximum object separations to be added to table = " + maxTableObjects);
 	if (drawConnector){
-		// for (key=0; key<maxLines; key++)
-			// IJ.log("Line color for separation " + key + ": " + lineColors[key] + "  -  line thickness: " + lineThickness[key]);
 		if (animStack) {
 			tA = "Separation Line Animation Stack";
 			run("Duplicate...", "title=[Separation Line Animation Stack]");
 			run("RGB Color");
 		}
 	}
-	createLabeledImage();		/* now create labeling image using ROIs */
+	createROILabeledImage(t,"Labeled");		/* now create labeled image using ROIs */
 	selectWindow(t);
-	/* Create Inline of Perimeter image for all objects */
+	/* Create Inline (perimeter pixels within object) of Perimeter image for all objects */
 	run("Duplicate...", "title=Inline");
 	run("Outline");
 	/* Arrays containing all inLine pixel coordinates and ROI-mapped intensities - with optional sub-sampling */
-	allInlinePxXs = newArray(round(2*totalPPx)); /* add 2x safety margin to starting array size */
-	allInlinePxYs = newArray(round(2*totalPPx));
-	bgI = getPixel(0, 0);
-	oPxls = 0;
+	allInlinePxXs = newArray(0);
+	allInlinePxYs = newArray(0);
+	bgI = getPixel(0, 0); /* Determine background intensity as corner pixel */
+	oPxls = 0; /* Counter for outline/inline pixels */
 	/* Get all perimeter coordinates */
 	for (iC=0; iC<imageWidth; iC++){
 		showProgress(iC, imageWidth);
@@ -143,23 +146,22 @@
 	IJ.log("Total perimeter pixels = " + totalPPx);
 	IJ.log("Total perimeter coordinate sets = " + oPxls);
 	closeImageByTitle("Inline");
-	allInlinePxXs = Array.trim(allInlinePxXs, oPxls) ;
-	allInlinePxYs = Array.trim(allInlinePxYs, oPxls) ;
-	allInlinePxROIs = newArray(oPxls);
+	allInlinePxROIs = newArray(0);
 	selectWindow("Labeled");
-	/* get map IDs and subtract 1 to get ROI number */
+	/* get map ROI number */
 	for (mapi=0; mapi<oPxls; mapi++){
 		showProgress(mapi, oPxls);
 		showStatus("Acquiring all map IDs");
-		allInlinePxROIs[mapi] = getPixel(allInlinePxXs[mapi], allInlinePxYs[mapi])-1;
+		allInlinePxROIs[mapi] = getPixel(allInlinePxXs[mapi], allInlinePxYs[mapi]);
 	}
 	closeImageByTitle("Labeled");
 	selectWindow(t);
 	oCXs = Table.getColumn("X");
 	oCYs = Table.getColumn("Y");
-	oCDSqs = newArray(rOIs);
+	oCDSqs = newArray(0);
 	flushCount = 0;
 	for (oROI=0; oROI<rOIs; oROI++){
+		oCDSqs = newArray(0);
 		showProgress(oROI, rOIs);
 		showStatus("!Looping through "+ oROI + " of all " + rOIs);
 		/* Create set of true ROI outline coordinates */
@@ -167,9 +169,8 @@
 		roiManager("Select", oROI);
 		run("Clear", "slice");
 		Roi.getBounds(xMin, yMin, roiWidth, roiHeight);
-		// maxPoints = roiWidth * roiHeight;
-		outlinePxXs = newArray(round(2*maxPerimPx));
-		outlinePxYs = newArray(round(2*maxPerimPx));
+		outlinePxXs = newArray(0);
+		outlinePxYs = newArray(0);
 		xMin -= 1;	yMin -= 1; /* Adjust bounds for Outline */
 		xMax = xMin + roiWidth + 2;
 		yMax = yMin + roiHeight + 2;
@@ -193,8 +194,6 @@
 			}
 		iM += subSamO;
 		}
-		outlinePxXs = Array.trim(outlinePxXs,rPxls);
-		outlinePxYs = Array.trim(outlinePxYs,rPxls);	
 		closeImageByTitle("ROIOutline");
 		/* End of Outline coordinate set creation */
 		selectWindow(t);
@@ -202,41 +201,35 @@
 			/* First create a list of the distances to all the other ROI centers */
 		for(iO=0; iO<rOIs; iO++){
 			if (iO!=oROI)	oCDSqs[iO] = pow(oCXs[oROI]-oCXs[iO],2) + pow(oCYs[oROI]-oCYs[iO],2);
-			else oCDSqs[iO] = (oROI+1)*dimSum; /* just something large enough to eliminate oROI from the sort */
+			else oCDSqs[iO] = dimProd; /* just something large enough to eliminate oROI from the sort */
 		}
 		nnOs = Array.rankPositions(oCDSqs); /* sort list of other ROIs by center-center distance-squared */
 		/* Filter coordinate arrays so they only include nearest ROIs limited by dialog option creating new filter arrays */
-		allInlinePxXsF = newArray(oPxls);
-		allInlinePxYsF = newArray(oPxls);
-		allInlinePxROIsF = newArray(oPxls);
+		allInlinePxXsF = newArray(0);
+		allInlinePxYsF = newArray(0);
+		allInlinePxROIsF = newArray(0);
 		oPxlsF = 0;
-		// startFilter = getTime();
 		for (n=0; n<maxNNOs; n++){
-			obFROI = nnOs[n];
 			for (f=0; f<oPxls; f++){
-				if (allInlinePxROIs[f]==obFROI) {
+				if (allInlinePxROIs[f]==nnOs[n]) {
 					allInlinePxXsF[oPxlsF] = allInlinePxXs[f];
 					allInlinePxYsF[oPxlsF] = allInlinePxYs[f];
-					allInlinePxROIsF[oPxlsF] = obFROI;
+					allInlinePxROIsF[oPxlsF] = nnOs[n];
 					oPxlsF += 1;
 				}
 			}
 		}		
-		allInlinePxXsF = Array.trim(allInlinePxXsF,oPxlsF);
-		allInlinePxYsF = Array.trim(allInlinePxYsF,oPxlsF);
-		allInlinePxROIsF = Array.trim(allInlinePxROIsF,oPxlsF);
 		/* Create or reset distance arrays for other objects */
-		minDSqs = newArray(maxNNOs);
-		minDROI = newArray(maxNNOs);
-		minXs = newArray(maxNNOs);
-		minYs = newArray(maxNNOs);
-		minXOs = newArray(maxNNOs);
-		minYOs = newArray(maxNNOs);
-		Array.fill(minXs, dimSum);
+		minDSqs = newArray(0);
+		minDROI = newArray(0);
+		minXs = newArray(0);
+		minYs = newArray(0);
+		minXOs = newArray(0);
+		minYOs = newArray(0);
 		/* For each ROI outline point find the min dist etc. to every inLine coordinate of the other ROIs */
 		for (dROI=0; dROI<maxNNOs; dROI++){
 			/* Find nearest in-line coordinate for every destination ROI */
-			minDSqs[dROI] = dimSum; /* just something very large */
+			minDSqs[dROI] = dimProd; /* just something very large */
 			for (rPx=0; rPx<rPxls; rPx++){ /* for all originating ROI outline pix */
 				x1 = outlinePxXs[rPx];
 				y1 = outlinePxYs[rPx];
@@ -276,7 +269,6 @@
 					Overlay.drawLine(minXOs[distROI], minYOs[distROI], minXs[distROI], minYs[distROI]);
 					Overlay.show;
 					if (animStack){
-						// Overlay.show;
 						run("Flatten");
 						rename("tempFrame");
 						addImageToStack(tA,t);
@@ -292,7 +284,6 @@
 			mC = parseInt(IJ.currentMemory());
 			mX = parseInt(IJ.maxMemory());
 			mCP = mC*(100/mX);
-			// IJ.log(mCP);
 			if (mCP>90) {
 				keepGoing = getBoolean(mCP + "% of IJ memory has been used, do you want to continue", "Yes", "No");
 				if (!keepGoing) restoreExit("ImageJ may need restart to free memory. Then try fewer ROIs");
@@ -336,9 +327,6 @@
 			extraLegendLines = floor((xStart + maxLines*5*fontSize)/imageWidth);
 			legendHeight += extraLegendLines*fontSize*1.5;
 		}
-		// IJ.log("xStart+maxLines*5*fontSize= " + xStart+maxLines*5*fontSize);
-		// IJ.log("floor((xStart+maxLines*5*fontSize)/imageWidth)= " + floor((xStart+maxLines*5*fontSize)/imageWidth));
-		// IJ.log("extraLegendLines = " + extraLegendLines);
 		if (legendLoc=="No") newImage("Legend", "RGB", legendWidth, legendHeight,1);
 		else {
 			if(animStack){
@@ -408,7 +396,6 @@
 	IJ.log("-----\n");
 	restoreSettings();
 	run("Select None");
-	run("Collect Garbage"); 
 	showStatus("!Separation Macro Finished: " + roiManager("count") + " objects analyzed in " + (getTime()-start)/1000 + "s.");
 	beep(); wait(300); beep(); wait(300); beep();
 	memFlush(300); /* Applies 3 memory clearing commands from a function with 300 ms wait times */
@@ -423,9 +410,11 @@
 		selectWindow(baseImage);
 	}
 	function arrayToString(array,delimiters){
-		/* 1st version April 2019 PJL */
+		/* 1st version April 2019 PJL
+			v190722 Modified to handle zero length array */
+		string = "";
 		for (i=0; i<array.length; i++){
-			if (i==0) string = "" + array[0];
+			if (i==0) string += array[0];
 			else  string = string + delimiters + array[i];
 		}
 		return string;
@@ -583,18 +572,20 @@
 		}
 		if (isOpen(oIID)) selectImage(oIID);
 	}
-	function createLabeledImage() {
-		/* v200306 requires restoreExit function */
-		labels = roiManager("count");
-		if (labels==0) restoreExit("Sorry, this macro labels using ROI Manager objects, try the Landini plugin instead.");
-		if (labels>=65536) restorExit("The labeling function is limited to 65536 objects");
-		if (labels<=253)	newImage("Labeled", "8-bit black", imageWidth, imageHeight, 1);
-		else newImage("Labeled", "16-bit black", imageWidth, imageHeight, 1);
+	function createROILabeledImage(originalImage,labelName) {
+		/* 1st version variant that uses white image so label can start at zero */
+		labels = roiManager("count"); /* ONLY this method of ROI counting returns "0" when there is no manager open */
+		if (labels==0) restoreExit("Sorry, this macro labels using ROI Manager objects, try the Gabriel Landini plugin instead.");
+		selectWindow(originalImage);
+		run("Duplicate...", "title="+labelName);
+		run("Convert to Mask");
+		if(getPixel(0, 0)==0) run("Invert");/* Want black objects */
+		if (labels>65536) run("32-bit"); /* hopefully no more than 4294967295! */
+		else if (labels>=255) run("16-bit");
 		for (i=0 ; i<labels; i++) {
 			roiManager("select", i);
-			labelValue = i+1;
-			run("Add...", "value=[labelValue]");
-			if (nResults==labels) setResult("Label\(Int\)", i, labelValue);
+			run("Add...", "value=[i]");
+			if (nResults==labels) setResult("Label\(Int\)", i, i);
 		}
 		run("Select None");
 	}
@@ -621,6 +612,22 @@
 		faveFontListCheck = Array.trim(faveFontListCheck, counter);
 		fontNameChoice = Array.concat(faveFontListCheck,fontNameChoice);
 		return fontNameChoice;
+	}
+	function getResultsTableList() {
+		/* simply returns array of open results tables
+		v200723: 1st version
+		v201207: Removed warning message */
+		nonImageWindows = getList("window.titles");
+		if (nonImageWindows.length>0){
+			resultsWindows = newArray();
+			for (i=0; i<nonImageWindows.length; i++){
+				selectWindow(nonImageWindows[i]);
+				if(getInfo("window.type")=="ResultsTable")
+				resultsWindows = Array.concat(resultsWindows,nonImageWindows[i]);    
+			}
+			return resultsWindows;
+		}
+		else return "";
 	}
 	function indexOfArray(array,string,default) {
 		/* v190423 Adds "default" parameter (use -1 for backwards compatibility). Returns only first found value */
@@ -683,6 +690,26 @@
 		memFlush(200);
 		exit(message);
 	}
+	function selectResultsWindow(){
+		/* selects the Results window
+			v200722: 1st version */
+		nonImageWindows = getList("window.titles");
+		resultsWindows = newArray();
+		if (nonImageWindows.length!=0) {
+			for (i=0; i<nonImageWindows.length; i++){
+				selectWindow(nonImageWindows[i]);
+				if(getInfo("window.type")=="ResultsTable")
+					resultsWindows = Array.concat(resultsWindows,nonImageWindows[i]);    
+			}
+		}
+		if (resultsWindows.length>1){
+			resultsWindows = Array.sort(resultsWindows); /* R for Results comes before S for Summary */
+			Dialog.create("Select table for analysis: v200722");
+			Dialog.addChoice("Choose Results Table: ",resultsWindows,resultsWindows[0]);
+			Dialog.show();
+			selectWindow(Dialog.getChoice());
+		}
+  	}
 	function getColorArrayFromColorName(colorName) {
 		/* v180828 added Fluorescent Colors
 		   v181017-8 added off-white and off-black for use in gif transparency and also added safe exit if no color match found
