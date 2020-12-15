@@ -72,11 +72,12 @@
 		colorString = call("ij.Prefs.get", prefsNameKey+"LineColors","red|cyan|pink|green|blue|yellow");
 		colorPrefs = split(colorString, prefsDelimiter);
 		colorPrefs = Array.concat(colorPrefs,defaultColorOrder);
-		defThickns = newArray(6);
+		defThickns = newArray(12);
 		Array.fill(defThickns, dLW);
 		defThicknString = arrayToString(defThickns,prefsDelimiter);
 		thicknString = call("ij.Prefs.get", prefsNameKey+"LineThickness",defThicknString);
-		thicknPrefs = split(thicknString, prefsDelimiter);
+		thicknString = replace(thicknString, NaN, dLW);
+		thicknPrefs = split(parseInt(thicknString), prefsDelimiter);
 		thicknPrefs = Array.concat(thicknPrefs,defThickns);
 		Dialog.create("Connector Overlay Line Drawing Options");
 			maxLines = minOf(maxTableObjects,6);
@@ -229,7 +230,7 @@
 		/* For each ROI outline point find the min dist etc. to every inLine coordinate of the other ROIs */
 		for (dROI=0; dROI<maxNNOs; dROI++){
 			/* Find nearest in-line coordinate for every destination ROI */
-			minDSqs[dROI] = dimProd; /* just something very large */
+			minDSqs[dROI] = dimProd; /* this should be greater than the largest distSq */
 			for (rPx=0; rPx<rPxls; rPx++){ /* for all originating ROI outline pix */
 				x1 = outlinePxXs[rPx];
 				y1 = outlinePxYs[rPx];
@@ -237,7 +238,7 @@
 					if(allInlinePxROIsF[dROIpx]==nnOs[dROI]) { /* skip all except destination ROI */
 						x2 = allInlinePxXsF[dROIpx];
 						y2 = allInlinePxYsF[dROIpx];
-						distSq = pow(x1-x2,2) + pow(y1-y2,2);
+						distSq = pow(x1-x2,2) + pow(y1-y2,2); /* note this this the sqrt is not applied until the result is determined for the table */
 						if (distSq < minDSqs[dROI]){
 							minDSqs[dROI] = distSq;
 							minXs[dROI] = x2;
@@ -409,13 +410,13 @@
 		run("Paste");
 		selectWindow(baseImage);
 	}
-	function arrayToString(array,delimiters){
+	function arrayToString(array,delimiter){
 		/* 1st version April 2019 PJL
-			v190722 Modified to handle zero length array */
-		string = "";
+			v190722 Modified to handle zero length array
+			v201215 += stopped working so this shortcut has been replaced */
 		for (i=0; i<array.length; i++){
-			if (i==0) string += array[0];
-			else  string = string + delimiters + array[i];
+			if (i==0) string = "" + array[0];
+			else  string = string + delimiter + array[i];
 		}
 		return string;
 	}
