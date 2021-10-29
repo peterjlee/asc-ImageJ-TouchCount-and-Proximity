@@ -11,8 +11,10 @@
 	v170914 Minimum separation now set to zero for 1st iteration touches if Watershed option is selected.
 	v180831 Corrected missing pixel statement in enlargement.
 	v190725 Updates all ASC functions. v191122 Minor tweaks
+	v200102 Updated functions
 */
 	requires("1.47r"); /* not sure of the actual latest working version byt 1.45 definitely doesn't work */
+	macroL = "Add_Proximity_and_Touch-Count_Min-Dist_to_Results_v200102.ijm";
 	saveSettings(); /* To restore settings at the end */
 	/*   ('.')  ('.')   Black objects on white background settings   ('.')   ('.')   */	
 	/* Set options for black objects on white background as this works better for publications */
@@ -36,6 +38,7 @@
 	lcf=(pixelWidth+pixelHeight)/2; /* ---> add here the side size of 1 pixel in the new calibrated units (e.g. lcf=5, if 1 pixels is 5mm) <--- */
 	/* create the dialog prompt */
 	Dialog.create("Choose Iterations and Watershed Correction");
+		Dialog.addMessage("This macro version: " = macroL);
 		Dialog.addNumber("No. of expansion touch count columns in Results Table:", columnSuggest, 0, 3, " Each iteration = " + pixelWidth + " " + unit);
 		Dialog.addNumber("Maximum number of pixel expansions (" + iterationLimit + " max):", iterationLimit, 0, 3, " " + iterationLimit + " expansions = " + iterationLimit * pixelWidth + " " + unit);
 		Dialog.setInsets(-2, 70, 10);
