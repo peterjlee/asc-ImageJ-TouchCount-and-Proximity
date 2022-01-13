@@ -11,8 +11,9 @@
 	v200722 Added manual macro label and selection of results table using new function.
 	v201215 Changed to expandable arrays and fixed unexpected skipping of objects.
 	v211022 Updated color choices
+	v211108 Updated functions
 */
-	macroL = "Add_NN_ROI_Min-Separation_to_Results_v211022";
+	macroL = "Add_NN_ROI_Min-Separation_to_Results_v211108";
 	requires("1.47r"); /* not sure of the actual latest working version but 1.45 definitely doesn't work */
 	memFlush(200); /* This macro needs all the help it can get */
 	saveSettings(); /* To restore settings at the end */
@@ -465,8 +466,9 @@
 	}
 	function checkForPlugin(pluginName) {
 		/* v161102 changed to true-false
-			v180831 some cleanup */
-		var pluginCheck = false, subFolderCount = 0;
+			v180831 some cleanup
+			v210429 Expandable array version */
+		var pluginCheck = false;
 		if (getDirectory("plugins") == "") restoreExit("Failure to find any plugins!");
 		else pluginDir = getDirectory("plugins");
 		if (!endsWith(pluginName, ".jar")) pluginName = pluginName + ".jar";
@@ -476,14 +478,13 @@
 		}
 		else {
 			pluginList = getFileList(pluginDir);
-			subFolderList = newArray(lengthOf(pluginList));
-			for (i=0; i<lengthOf(pluginList); i++) {
+			subFolderList = newArray;
+			for (i=0,subFolderCount=0; i<lengthOf(pluginList); i++) {
 				if (endsWith(pluginList[i], "/")) {
 					subFolderList[subFolderCount] = pluginList[i];
-					subFolderCount += 1;
+					subFolderCount++;
 				}
 			}
-			subFolderList = Array.trim(subFolderList, subFolderCount);
 			for (i=0; i<lengthOf(subFolderList); i++) {
 				if (File.exists(pluginDir + subFolderList[i] +  "\\" + pluginName)) {
 					pluginCheck = true;
@@ -497,24 +498,55 @@
 	function checkForRoiManager() {
 		/* v161109 adds the return of the updated ROI count and also adds dialog if there are already entries just in case . .
 			v180104 only asks about ROIs if there is a mismatch with the results
-			v190628 adds option to import saved ROI set */
+			v190628 adds option to import saved ROI set
+			v210428	include thresholding if necessary and color check
+			v211108 Uses radio-button group.
+			NOTE: Requires ASC restoreExit function, which assumes that saveSettings has been run at the beginning of the macro
+			*/
+		functionL = "checkForRoiManager_v211108";
 		nROIs = roiManager("count");
 		nRes = nResults; /* Used to check for ROIs:Results mismatch */
 		if(nROIs==0 || nROIs!=nRes){
-			Dialog.create("ROI options");
+			Dialog.create("ROI mismatch options: " + functionL);
 				Dialog.addMessage("This macro requires that all objects have been loaded into the ROI manager.\n \nThere are   " + nRes +"   results.\nThere are   " + nROIs +"   ROIs.\nDo you want to:");
-				if(nROIs==0) Dialog.addCheckbox("Import a saved ROI list",false);
-				else Dialog.addCheckbox("Replace the current ROI list with a saved ROI list",false);
-				if(nRes==0) Dialog.addCheckbox("Import a Results Table \(csv\) file",false);
-				else Dialog.addCheckbox("Clear Results Table and import saved csv",false);
-				Dialog.addCheckbox("Clear ROI list and Results Table and reanalyze \(overrides above selections\)",true);
-				Dialog.addCheckbox("Get me out of here, I am having second thoughts . . .",false);
+				mismatchOptions = newArray();
+				if(nROIs==0) mismatchOptions = Array.concat(mismatchOptions,"Import a saved ROI list");
+				else mismatchOptions = Array.concat(mismatchOptions,"Replace the current ROI list with a saved ROI list");
+				if(nRes==0) mismatchOptions = Array.concat(mismatchOptions,"Import a Results Table \(csv\) file");
+				else mismatchOptions = Array.concat(mismatchOptions,"Clear Results Table and import saved csv");
+				mismatchOptions = Array.concat(mismatchOptions,"Clear ROI list and Results Table and reanalyze \(overrides above selections\)");
+				if (!is("binary")) mismatchOptions = Array.concat(mismatchOptions,"The active image is not binary, so it may require thresholding before analysis");
+				mismatchOptions = Array.concat(mismatchOptions,"Get me out of here, I am having second thoughts . . .");
+				Dialog.addRadioButtonGroup("ROI mismatch; what would you like to do:_____", mismatchOptions, lengthOf(mismatchOptions), 1, mismatchOptions[0]);
 			Dialog.show();
-				importROI = Dialog.getCheckbox;
-				importResults = Dialog.getCheckbox;
-				runAnalyze = Dialog.getCheckbox;
-				if (Dialog.getCheckbox) restoreExit("Sorry this did not work out for you.");
-			if (runAnalyze) {
+				mOption = Dialog.getRadioButton();
+				if (startsWith(mOption,"Sorry")) restoreExit("Sorry this did not work out for you.");
+			if (startsWith(mOption,"Clear ROI list and Results Table and reanalyze")) {
+				if (!is("binary")){
+					if (is("grayscale") && bitDepth()>8){
+						proceed = getBoolean("Image is grayscale but not 8-bit, convert it to 8-bit?", "Convert for thresholding", "Get me out of here");
+						if (proceed) run("8-bit");
+						else restoreExit("Goodbye, perhaps analyze first?");
+					}
+					if (bitDepth()==24){
+						colorThreshold = getBoolean("Active image is RGB, so analysis requires thresholding", "Color Threshold", "Convert to 8-bit and threshold");
+						if (colorThreshold) run("Color Threshold...");
+						else run("8-bit");
+					}
+					if (!is("binary")){
+						/* Quick-n-dirty threshold if not previously thresholded */
+						getThreshold(t1,t2);  
+						if (t1==-1)  {
+							run("Auto Threshold", "method=Default");
+							setOption("BlackBackground", false);
+							run("Make Binary");
+						}
+						if (is("Inverting LUT"))  {
+							trueLUT = getBoolean("The LUT appears to be inverted, do you want the true LUT?", "Yes Please", "No Thanks");
+							if (trueLUT) run("Invert LUT");
+						}
+					}
+				}
 				if (isOpen("ROI Manager"))	roiManager("reset");
 				setOption("BlackBackground", false);
 				if (isOpen("Results")) {
@@ -526,13 +558,13 @@
 					restoreExit("Results and ROI Manager counts do not match!");
 			}
 			else {
-				if (importROI) {
+				if (startsWith(mOption,"Import a saved ROI")) {
 					if (isOpen("ROI Manager"))	roiManager("reset");
 					msg = "Import ROI set \(zip file\), click \"OK\" to continue to file chooser";
 					showMessage(msg);
 					roiManager("Open", "");
 				}
-				if (importResults){
+				if (startsWith(mOption,"Import a Results")){
 					if (isOpen("Results")) {
 						selectWindow("Results");
 						run("Close");
@@ -552,10 +584,12 @@
 	}
 	function checkForUnits() {  /* Generic version 
 		/* v161108 (adds inches to possible reasons for checking calibration)
-		 v170914 Radio dialog with more information displayed */
+		 v170914 Radio dialog with more information displayed
+		 v200925 looks for pixels unit too; v210428 just adds function label */
+		functionL = "checkForUnits_v210428";
 		getPixelSize(unit, pixelWidth, pixelHeight);
-		if (pixelWidth!=pixelHeight || pixelWidth==1 || unit=="" || unit=="inches"){
-			Dialog.create("Suspicious Units");
+		if (pixelWidth!=pixelHeight || pixelWidth==1 || unit=="" || unit=="inches" || unit=="pixels"){
+			Dialog.create("Suspicious Units: " + functionL);
 			rescaleChoices = newArray("Define new units for this image", "Use current scale", "Exit this macro");
 			rescaleDialogLabel = "pixelHeight = "+pixelHeight+", pixelWidth = "+pixelWidth+", unit = "+unit+": what would you like to do?";
 			Dialog.addRadioButtonGroup(rescaleDialogLabel, rescaleChoices, 3, 1, rescaleChoices[0]) ;
@@ -566,9 +600,11 @@
 		}
 	}
 	function closeImageByTitle(windowTitle) {  /* Cannot be used with tables */
-		/* v181002 reselects original image at end if open */
+		/* v181002 reselects original image at end if open
+		   v200925 uses "while" instead of if so it can also remove duplicates
+		*/
 		oIID = getImageID();
-        if (isOpen(windowTitle)) {
+        while (isOpen(windowTitle)) {
 			selectWindow(windowTitle);
 			close();
 		}

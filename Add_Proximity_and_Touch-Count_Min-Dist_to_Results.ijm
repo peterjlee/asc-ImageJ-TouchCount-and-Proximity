@@ -11,10 +11,10 @@
 	v170914 Minimum separation now set to zero for 1st iteration touches if Watershed option is selected.
 	v180831 Corrected missing pixel statement in enlargement.
 	v190725 Updates all ASC functions. v191122 Minor tweaks
-	v200102 Updated functions
+	v200102-v211029 Updated functions
 */
-	requires("1.47r"); /* not sure of the actual latest working version byt 1.45 definitely doesn't work */
-	macroL = "Add_Proximity_and_Touch-Count_Min-Dist_to_Results_v200102.ijm";
+	requires("1.47r"); /* not sure of the actual latest working version but 1.45 definitely doesn't work */
+	macroL = "Add_Proximity_and_Touch-Count_Min-Dist_to_Results_v211029.ijm";
 	saveSettings(); /* To restore settings at the end */
 	/*   ('.')  ('.')   Black objects on white background settings   ('.')   ('.')   */	
 	/* Set options for black objects on white background as this works better for publications */
