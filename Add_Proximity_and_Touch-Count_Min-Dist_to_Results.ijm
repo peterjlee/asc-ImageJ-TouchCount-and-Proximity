@@ -11,10 +11,10 @@
 	v170914 Minimum separation now set to zero for 1st iteration touches if Watershed option is selected.
 	v180831 Corrected missing pixel statement in enlargement.
 	v190725 Updates all ASC functions. v191122 Minor tweaks
-	v200102-v211029 Updated functions
+	v200102-v220701 Updated functions f1 updated color functions and replaced binary[-]Check function with toWhiteBGBinary
 */
 	requires("1.47r"); /* not sure of the actual latest working version but 1.45 definitely doesn't work */
-	macroL = "Add_Proximity_and_Touch-Count_Min-Dist_to_Results_v211029.ijm";
+	macroL = "Add_Proximity_and_Touch-Count_Min-Dist_to_Results_v211029-f1.ijm";
 	saveSettings(); /* To restore settings at the end */
 	/*   ('.')  ('.')   Black objects on white background settings   ('.')   ('.')   */	
 	/* Set options for black objects on white background as this works better for publications */
@@ -25,7 +25,7 @@
 	/*	The above should be the defaults but this makes sure (black particles on a white background) http://imagejdocu.tudor.lu/doku.php?id=faq:technical:how_do_i_set_up_imagej_to_deal_with_white_particles_on_a_black_background_by_default
 	*/
 	t = getTitle();
-	binaryCheck(t);
+	toWhiteBGBinary(t);
 	if (removeEdgeObjects() && roiManager("count")!=0) roiManager("reset"); /* macro does not make much sense if there are edge objects but perhaps they are not included in ROI list (you can cancel out of this). if the object removal routine is run it will also reset the ROI Manager list if it already contains entries */
 	checkForRoiManager();
 	run("Options...", "count=1 do=Nothing"); /* The binary count setting is set to "1" for consistent outlines */
@@ -132,36 +132,6 @@
 	/*
 		( 8(|)	( 8(|)	ASC Functions	@@@@@:-)	@@@@@:-)
 	*/
-	function binaryCheck(windowTitle) { /* For black objects on a white background */
-		/* v180601 added choice to invert or not 
-		v180907 added choice to revert to the true LUT, changed border pixel check to array stats
-		v190725 Changed to make binary
-		*/
-		selectWindow(windowTitle);
-		if (!is("binary")) run("8-bit");
-		/* Quick-n-dirty threshold if not previously thresholded */
-		getThreshold(t1,t2); 
-		if (t1==-1)  {
-			run("8-bit");
-			run("Auto Threshold", "method=Default");
-			setOption("BlackBackground", false);
-			run("Make Binary");
-		}
-		if (is("Inverting LUT"))  {
-			trueLUT = getBoolean("The LUT appears to be inverted, do you want the true LUT?", "Yes Please", "No Thanks");
-			if (trueLUT) run("Invert LUT");
-		}
-		/* Make sure black objects on white background for consistency */
-		cornerPixels = newArray(getPixel(0, 0), getPixel(0, 1), getPixel(1, 0), getPixel(1, 1));
-		Array.getStatistics(cornerPixels, cornerMin, cornerMax, cornerMean, cornerStdDev);
-		if (cornerMax!=cornerMin) restoreExit("Problem with image border: Different pixel intensities at corners");
-		/*	Sometimes the outline procedure will leave a pixel border around the outside - this next step checks for this.
-			i.e. the corner 4 pixels should now be all black, if not, we have a "border issue". */
-		if (cornerMean==0) {
-			inversion = getBoolean("The background appears to have intensity zero, do you want the intensities inverted?", "Yes Please", "No Thanks");
-			if (inversion) run("Invert"); 
-		}
-	}
 	function checkForEdgeObjects(){
 	/*	1st version v190725 */
 		run("Select None");
@@ -341,4 +311,28 @@
 		setBatchMode("exit & display"); /* Probably not necessary if exiting gracefully but otherwise harmless */
 		run("Collect Garbage"); 
 		exit(message);
+	}
+	function toWhiteBGBinary(windowTitle) { /* For black objects on a white background */
+		/* Replaces binary[-]Check function
+		v220707
+		*/
+		selectWindow(windowTitle);
+		if (!is("binary")) run("8-bit");
+		/* Quick-n-dirty threshold if not previously thresholded */
+		getThreshold(t1,t2);
+		if (t1==-1)  {
+			run("8-bit");
+			run("Auto Threshold", "method=Default");
+			setOption("BlackBackground", false);
+			run("Make Binary");
+		}
+		if (is("Inverting LUT")) run("Invert LUT");
+		/* Make sure black objects on white background for consistency */
+		yMax = Image.height-1;	xMax = Image.width-1;
+		cornerPixels = newArray(getPixel(0,0),getPixel(1,1),getPixel(0,yMax),getPixel(xMax,0),getPixel(xMax,yMax),getPixel(xMax-1,yMax-1));
+		Array.getStatistics(cornerPixels, cornerMin, cornerMax, cornerMean, cornerStdDev);
+		if (cornerMax!=cornerMin) IJ.log("Warning: There may be a problem with the image border, there are different pixel intensities at the corners");
+		/*	Sometimes the outline procedure will leave a pixel border around the outside - this next step checks for this.
+			i.e. the corner 4 pixels should now be all black, if not, we have a "border issue". */
+		if (cornerMean<1) run("Invert");
 	}
