@@ -16,9 +16,9 @@
 	v220708 Now works for color images assuming ROI set has already been created but requires new createROIBinaryImage function. Added more time diagnostics - v220710
 	v220720 Adds option to save ROI object numbers for nearest neighbor cluster.
 	v220816 If pixel sampling is chosen the adjacent array coordinates will also be sampled.
-	v220817 Added dialog option to control re-sampling range and consolidated labeling dialogs. This variant does not use CLIJ.
+	v220817 Added dialog option to control re-sampling range and consolidated labeling dialogs. This variant does not use CLIJ. f1: updated check-for-plugin function
 	*/
-	macroL = "Add_NN_ROI_Min-Separation_to_Results_v220817";
+	macroL = "Add_NN_ROI_Min-Separation_to_Results_v220817-f1";
 	requires("1.47r"); /* not sure of the actual latest working version but 1.45 definitely doesn't work */
 	memFlush(200); /* This macro needs all the help it can get */
 	saveSettings(); /* To restore settings at the end */
@@ -31,8 +31,7 @@
 	if (imageN==0) restoreExit("Sorry, this macro needs at least one open image open");
 	else t = getTitle();
 	if (removeEdgeObjects() && roiManager("count")!=0) roiManager("reset"); /* macro does not make much sense if there are edge objects but perhaps they are not included in ROI list (you can cancel out of this). if the object removal routine is run it will also reset the ROI Manager list if it already contains entries */
-	checkForRoiManager();
-	nROIs = roiManager("count");
+	nROIs = checkForRoiManager();
 	fCycles = floor(nROIs/10); /* How frequently to check memory usage */
 	run("Options...", "count=1 do=Nothing"); /* The binary count setting is set to "1" for consistent outlines */
 	imageWidth = getWidth();
@@ -588,29 +587,40 @@
 	function checkForPlugin(pluginName) {
 		/* v161102 changed to true-false
 			v180831 some cleanup
-			v210429 Expandable array version */
-		var pluginCheck = false;
-		if (getDirectory("plugins") == "") restoreExit("Failure to find any plugins!");
-		else pluginDir = getDirectory("plugins");
-		if (!endsWith(pluginName, ".jar")) pluginName = pluginName + ".jar";
-		if (File.exists(pluginDir + pluginName)) {
-				pluginCheck = true;
-				showStatus(pluginName + "found in: "  + pluginDir);
-		}
+			v210429 Expandable array version
+			v220510 Looks for both class and jar if no extension is given
+			v220818 Mystery issue fixed, no longer requires restoreExit	*/
+		pluginCheck = false;
+		if (getDirectory("plugins") == "") print("Failure to find any plugins!");
 		else {
-			pluginList = getFileList(pluginDir);
-			subFolderList = newArray;
-			for (i=0,subFolderCount=0; i<lengthOf(pluginList); i++) {
-				if (endsWith(pluginList[i], "/")) {
-					subFolderList[subFolderCount] = pluginList[i];
-					subFolderCount++;
-				}
-			}
-			for (i=0; i<lengthOf(subFolderList); i++) {
-				if (File.exists(pluginDir + subFolderList[i] +  "\\" + pluginName)) {
+			pluginDir = getDirectory("plugins");
+			if (lastIndexOf(pluginName,".")==pluginName.length-1) pluginName = substring(pluginName,0,pluginName.length-1);
+			pExts = newArray(".jar",".class");
+			knownExt = false;
+			for (j=0; j<lengthOf(pExts); j++) if(endsWith(pluginName,pExts[j])) knownExt = true;
+			pluginNameO = pluginName;
+			for (j=0; j<lengthOf(pExts) && !pluginCheck; j++){
+				if (!knownExt) pluginName = pluginName + pExts[j];
+				if (File.exists(pluginDir + pluginName)) {
 					pluginCheck = true;
-					showStatus(pluginName + " found in: " + pluginDir + subFolderList[i]);
-					i = lengthOf(subFolderList);
+					showStatus(pluginName + "found in: "  + pluginDir);
+				}
+				else {
+					pluginList = getFileList(pluginDir);
+					subFolderList = newArray;
+					for (i=0,subFolderCount=0; i<lengthOf(pluginList); i++) {
+						if (endsWith(pluginList[i], "/")) {
+							subFolderList[subFolderCount] = pluginList[i];
+							subFolderCount++;
+						}
+					}
+					for (i=0; i<lengthOf(subFolderList); i++) {
+						if (File.exists(pluginDir + subFolderList[i] +  "\\" + pluginName)) {
+							pluginCheck = true;
+							showStatus(pluginName + " found in: " + pluginDir + subFolderList[i]);
+							i = lengthOf(subFolderList);
+						}
+					}
 				}
 			}
 		}
