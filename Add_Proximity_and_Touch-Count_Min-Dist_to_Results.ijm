@@ -11,10 +11,10 @@
 	v170914 Minimum separation now set to zero for 1st iteration touches if Watershed option is selected.
 	v180831 Corrected missing pixel statement in enlargement.
 	v190725 Updates all ASC functions. v191122 Minor tweaks
-	v200102-v220701 Updated functions f1 updated color functions and replaced binary[-]Check function with toWhiteBGBinary
+	v200102-v220701 Updated functions f1 updated color functions and replaced binary[-]Check function with toWhiteBGBinary f2: updated functions.
 */
 	requires("1.47r"); /* not sure of the actual latest working version but 1.45 definitely doesn't work */
-	macroL = "Add_Proximity_and_Touch-Count_Min-Dist_to_Results_v211029-f1.ijm";
+	macroL = "Add_Proximity_and_Touch-Count_Min-Dist_to_Results_v220823.ijm";
 	saveSettings(); /* To restore settings at the end */
 	/*   ('.')  ('.')   Black objects on white background settings   ('.')   ('.')   */	
 	/* Set options for black objects on white background as this works better for publications */
@@ -27,7 +27,7 @@
 	t = getTitle();
 	toWhiteBGBinary(t);
 	if (removeEdgeObjects() && roiManager("count")!=0) roiManager("reset"); /* macro does not make much sense if there are edge objects but perhaps they are not included in ROI list (you can cancel out of this). if the object removal routine is run it will also reset the ROI Manager list if it already contains entries */
-	checkForRoiManager();
+	nROIs = checkForRoiManager();
 	run("Options...", "count=1 do=Nothing"); /* The binary count setting is set to "1" for consistent outlines */
 	imageWidth = getWidth();
 	imageHeight = getHeight();
@@ -37,8 +37,7 @@
 	getPixelSize(unit, pixelWidth, pixelHeight);
 	lcf=(pixelWidth+pixelHeight)/2; /* ---> add here the side size of 1 pixel in the new calibrated units (e.g. lcf=5, if 1 pixels is 5mm) <--- */
 	/* create the dialog prompt */
-	Dialog.create("Choose Iterations and Watershed Correction");
-		Dialog.addMessage("This macro version: " = macroL);
+	Dialog.create("Choose Iterations and Watershed Correction \(" + macroL + "\)");
 		Dialog.addNumber("No. of expansion touch count columns in Results Table:", columnSuggest, 0, 3, " Each iteration = " + pixelWidth + " " + unit);
 		Dialog.addNumber("Maximum number of pixel expansions (" + iterationLimit + " max):", iterationLimit, 0, 3, " " + iterationLimit + " expansions = " + iterationLimit * pixelWidth + " " + unit);
 		Dialog.setInsets(-2, 70, 10);
@@ -51,8 +50,7 @@
 		maxExpansionsD = Dialog.getNumber; /* put a limit of how many expansions before quitting NOTE: the maximum is 255 */
 		wCorr = Dialog.getCheckbox;
 	IJ.log("-----\n\n");
-	IJ.log("Proximity Count macro");
-	IJ.log("Macro path: " + getInfo("macro.filepath"));
+	IJ.log("Proximity Count macro \(" + macroL + "\)");
 	IJ.log("Image used for count: " + t);
 	IJ.log("Original magnification scale factor used = " + lcf + " with units: " + unit);
 	IJ.log("Note that separations measured this way are only approximate for large separations.");
@@ -146,56 +144,108 @@
 	}
 	function checkForPlugin(pluginName) {
 		/* v161102 changed to true-false
-			v180831 some cleanup */
-		var pluginCheck = false, subFolderCount = 0;
-		if (getDirectory("plugins") == "") restoreExit("Failure to find any plugins!");
-		else pluginDir = getDirectory("plugins");
-		if (!endsWith(pluginName, ".jar")) pluginName = pluginName + ".jar";
-		if (File.exists(pluginDir + pluginName)) {
-				pluginCheck = true;
-				showStatus(pluginName + "found in: "  + pluginDir);
-		}
+			v180831 some cleanup
+			v210429 Expandable array version
+			v220510 Looks for both class and jar if no extension is given
+			v220818 Mystery issue fixed, no longer requires restoreExit	*/
+		pluginCheck = false;
+		if (getDirectory("plugins") == "") print("Failure to find any plugins!");
 		else {
-			pluginList = getFileList(pluginDir);
-			subFolderList = newArray(lengthOf(pluginList));
-			for (i=0; i<lengthOf(pluginList); i++) {
-				if (endsWith(pluginList[i], "/")) {
-					subFolderList[subFolderCount] = pluginList[i];
-					subFolderCount += 1;
-				}
-			}
-			subFolderList = Array.trim(subFolderList, subFolderCount);
-			for (i=0; i<lengthOf(subFolderList); i++) {
-				if (File.exists(pluginDir + subFolderList[i] +  "\\" + pluginName)) {
+			pluginDir = getDirectory("plugins");
+			if (lastIndexOf(pluginName,".")==pluginName.length-1) pluginName = substring(pluginName,0,pluginName.length-1);
+			pExts = newArray(".jar",".class");
+			knownExt = false;
+			for (j=0; j<lengthOf(pExts); j++) if(endsWith(pluginName,pExts[j])) knownExt = true;
+			pluginNameO = pluginName;
+			for (j=0; j<lengthOf(pExts) && !pluginCheck; j++){
+				if (!knownExt) pluginName = pluginName + pExts[j];
+				if (File.exists(pluginDir + pluginName)) {
 					pluginCheck = true;
-					showStatus(pluginName + " found in: " + pluginDir + subFolderList[i]);
-					i = lengthOf(subFolderList);
+					showStatus(pluginName + "found in: "  + pluginDir);
+				}
+				else {
+					pluginList = getFileList(pluginDir);
+					subFolderList = newArray;
+					for (i=0,subFolderCount=0; i<lengthOf(pluginList); i++) {
+						if (endsWith(pluginList[i], "/")) {
+							subFolderList[subFolderCount] = pluginList[i];
+							subFolderCount++;
+						}
+					}
+					for (i=0; i<lengthOf(subFolderList); i++) {
+						if (File.exists(pluginDir + subFolderList[i] +  "\\" + pluginName)) {
+							pluginCheck = true;
+							showStatus(pluginName + " found in: " + pluginDir + subFolderList[i]);
+							i = lengthOf(subFolderList);
+						}
+					}
 				}
 			}
 		}
 		return pluginCheck;
 	}
-	function checkForRoiManager() {
+function checkForRoiManager() {
 		/* v161109 adds the return of the updated ROI count and also adds dialog if there are already entries just in case . .
 			v180104 only asks about ROIs if there is a mismatch with the results
-			v190628 adds option to import saved ROI set */
+			v190628 adds option to import saved ROI set
+			v210428	include thresholding if necessary and color check
+			v211108 Uses radio-button group.
+			NOTE: Requires ASC restoreExit function, which assumes that saveSettings has been run at the beginning of the macro
+			v220706: Table friendly version
+			*/
+		functionL = "checkForRoiManager_v220706b";
 		nROIs = roiManager("count");
-		nRes = nResults; /* Used to check for ROIs:Results mismatch */
+		nRes = nResults;
+		tSize = Table.size;
+		if (nRes==0 && tSize>0){
+			oTableTitle = Table.title;
+			renameTable = getBoolean("There is no Results table but " + oTableTitle + "has " +tSize+ "rows:", "Rename to Results", "No, I will take may chances");
+			if (renameTable) {
+				Table.rename(oTableTitle, "Results");
+				nRes = nResults;
+			}
+		}
 		if(nROIs==0 || nROIs!=nRes){
-			Dialog.create("ROI options");
+			Dialog.create("ROI mismatch options: " + functionL);
 				Dialog.addMessage("This macro requires that all objects have been loaded into the ROI manager.\n \nThere are   " + nRes +"   results.\nThere are   " + nROIs +"   ROIs.\nDo you want to:");
-				if(nROIs==0) Dialog.addCheckbox("Import a saved ROI list",false);
-				else Dialog.addCheckbox("Replace the current ROI list with a saved ROI list",false);
-				if(nRes==0) Dialog.addCheckbox("Import a Results Table \(csv\) file",false);
-				else Dialog.addCheckbox("Clear Results Table and import saved csv",false);
-				Dialog.addCheckbox("Clear ROI list and Results Table and reanalyze \(overrides above selections\)",true);
-				Dialog.addCheckbox("Get me out of here, I am having second thoughts . . .",false);
+				mismatchOptions = newArray();
+				if(nROIs==0) mismatchOptions = Array.concat(mismatchOptions,"Import a saved ROI list");
+				else mismatchOptions = Array.concat(mismatchOptions,"Replace the current ROI list with a saved ROI list");
+				if(nRes==0) mismatchOptions = Array.concat(mismatchOptions,"Import a Results Table \(csv\) file");
+				else mismatchOptions = Array.concat(mismatchOptions,"Clear Results Table and import saved csv");
+				mismatchOptions = Array.concat(mismatchOptions,"Clear ROI list and Results Table and reanalyze \(overrides above selections\)");
+				if (!is("binary")) mismatchOptions = Array.concat(mismatchOptions,"The active image is not binary, so it may require thresholding before analysis");
+				mismatchOptions = Array.concat(mismatchOptions,"Get me out of here, I am having second thoughts . . .");
+				Dialog.addRadioButtonGroup("ROI mismatch; what would you like to do:_____", mismatchOptions, lengthOf(mismatchOptions), 1, mismatchOptions[0]);
 			Dialog.show();
-				importROI = Dialog.getCheckbox;
-				importResults = Dialog.getCheckbox;
-				runAnalyze = Dialog.getCheckbox;
-				if (Dialog.getCheckbox) restoreExit("Sorry this did not work out for you.");
-			if (runAnalyze) {
+				mOption = Dialog.getRadioButton();
+				if (startsWith(mOption,"Sorry")) restoreExit("Sorry this did not work out for you.");
+			if (startsWith(mOption,"Clear ROI list and Results Table and reanalyze")) {
+				if (!is("binary")){
+					if (is("grayscale") && bitDepth()>8){
+						proceed = getBoolean("Image is grayscale but not 8-bit, convert it to 8-bit?", "Convert for thresholding", "Get me out of here");
+						if (proceed) run("8-bit");
+						else restoreExit("Goodbye, perhaps analyze first?");
+					}
+					if (bitDepth()==24){
+						colorThreshold = getBoolean("Active image is RGB, so analysis requires thresholding", "Color Threshold", "Convert to 8-bit and threshold");
+						if (colorThreshold) run("Color Threshold...");
+						else run("8-bit");
+					}
+					if (!is("binary")){
+						/* Quick-n-dirty threshold if not previously thresholded */
+						getThreshold(t1,t2);
+						if (t1==-1)  {
+							run("Auto Threshold", "method=Default");
+							setOption("BlackBackground", false);
+							run("Make Binary");
+						}
+						if (is("Inverting LUT"))  {
+							trueLUT = getBoolean("The LUT appears to be inverted, do you want the true LUT?", "Yes Please", "No Thanks");
+							if (trueLUT) run("Invert LUT");
+						}
+					}
+				}
 				if (isOpen("ROI Manager"))	roiManager("reset");
 				setOption("BlackBackground", false);
 				if (isOpen("Results")) {
@@ -207,20 +257,21 @@
 					restoreExit("Results and ROI Manager counts do not match!");
 			}
 			else {
-				if (importROI) {
+				if (startsWith(mOption,"Import a saved ROI")) {
 					if (isOpen("ROI Manager"))	roiManager("reset");
 					msg = "Import ROI set \(zip file\), click \"OK\" to continue to file chooser";
 					showMessage(msg);
-					roiManager("Open", "");
+					pathROI = File.openDialog("Select an ROI file set to import");
+                    roiManager("open", pathROI);
 				}
-				if (importResults){
+				if (startsWith(mOption,"Import a Results")){
 					if (isOpen("Results")) {
 						selectWindow("Results");
 						run("Close");
 					}
-					msg = "Import Results Table, click \"OK\" to continue to file chooser";
+					msg = "Import Results Table: Click \"OK\" to continue to file chooser";
 					showMessage(msg);
-					open("");
+					open(File.openDialog("Select a Results Table to import"));
 					Table.rename(Table.title, "Results");
 				}
 			}
@@ -228,15 +279,18 @@
 		nROIs = roiManager("count");
 		nRes = nResults; /* Used to check for ROIs:Results mismatch */
 		if(nROIs==0 || nROIs!=nRes)
-			restoreExit("Goodbye, your previous setting will be restored.");
+			restoreExit("Goodbye, there are " + nROIs + " ROIs and " + nRes + " results; your previous settings will be restored.");
 		return roiManager("count"); /* Returns the new count of entries */
 	}
-	function checkForUnits() {  /* Generic version 
+	function checkForUnits() {  /* Generic version
 		/* v161108 (adds inches to possible reasons for checking calibration)
-		 v170914 Radio dialog with more information displayed */
+		 v170914 Radio dialog with more information displayed
+		 v200925 looks for pixels unit too; v210428 just adds function label
+		NOTE: REQUIRES ASC restoreExit function which requires previous run of saveSettings		 */
+		functionL = "checkForUnits_v210428";
 		getPixelSize(unit, pixelWidth, pixelHeight);
-		if (pixelWidth!=pixelHeight || pixelWidth==1 || unit=="" || unit=="inches"){
-			Dialog.create("Suspicious Units");
+		if (pixelWidth!=pixelHeight || pixelWidth==1 || unit=="" || unit=="inches" || unit=="pixels"){
+			Dialog.create("Suspicious Units: " + functionL);
 			rescaleChoices = newArray("Define new units for this image", "Use current scale", "Exit this macro");
 			rescaleDialogLabel = "pixelHeight = "+pixelHeight+", pixelWidth = "+pixelWidth+", unit = "+unit+": what would you like to do?";
 			Dialog.addRadioButtonGroup(rescaleDialogLabel, rescaleChoices, 3, 1, rescaleChoices[0]) ;
@@ -247,19 +301,22 @@
 		}
 	}
 	function closeImageByTitle(windowTitle) {  /* Cannot be used with tables */
-		/* v181002 reselects original image at end if open */
+		/* v181002 reselects original image at end if open
+		   v200925 uses "while" instead of "if" so that it can also remove duplicates
+		*/
 		oIID = getImageID();
-        if (isOpen(windowTitle)) {
+        while (isOpen(windowTitle)) {
 			selectWindow(windowTitle);
 			close();
 		}
 		if (isOpen(oIID)) selectImage(oIID);
 	}
 	function createLabeledImage() {
-		/* v180305 */
+		/* v200306 requires restoreExit function
+		NOTE: REQUIRES ASC restoreExit function which requires previous run of saveSettings		*/
 		labels = roiManager("count");
-		if (labels==0) cleanExit("Sorry, this macro labels using ROI Manager objects, try the Landini plugin instead.");
-		if (labels>=65536) cleanExit("The labeling function is limited to 65536 objects");
+		if (labels==0) restoreExit("Sorry, this macro labels using ROI Manager objects, try the Landini plugin instead.");
+		if (labels>=65536) restorExit("The labeling function is limited to 65536 objects");
 		if (labels<=253)	newImage("Labeled", "8-bit black", imageWidth, imageHeight, 1);
 		else newImage("Labeled", "16-bit black", imageWidth, imageHeight, 1);
 		for (i=0 ; i<labels; i++) {
