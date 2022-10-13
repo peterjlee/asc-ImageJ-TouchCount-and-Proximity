@@ -184,7 +184,7 @@
 		}
 		return pluginCheck;
 	}
-function checkForRoiManager() {
+	function checkForRoiManager() {
 		/* v161109 adds the return of the updated ROI count and also adds dialog if there are already entries just in case . .
 			v180104 only asks about ROIs if there is a mismatch with the results
 			v190628 adds option to import saved ROI set
@@ -192,8 +192,10 @@ function checkForRoiManager() {
 			v211108 Uses radio-button group.
 			NOTE: Requires ASC restoreExit function, which assumes that saveSettings has been run at the beginning of the macro
 			v220706: Table friendly version
+			v220816: Enforces non-inverted LUT as well as white background and fixes ROI-less analyze.  Adds more dialog labeling.
+			v220823: Extended corner pixel test.
 			*/
-		functionL = "checkForRoiManager_v220706b";
+		functionL = "checkForRoiManager_v220816";
 		nROIs = roiManager("count");
 		nRes = nResults;
 		tSize = Table.size;
@@ -214,7 +216,7 @@ function checkForRoiManager() {
 				if(nRes==0) mismatchOptions = Array.concat(mismatchOptions,"Import a Results Table \(csv\) file");
 				else mismatchOptions = Array.concat(mismatchOptions,"Clear Results Table and import saved csv");
 				mismatchOptions = Array.concat(mismatchOptions,"Clear ROI list and Results Table and reanalyze \(overrides above selections\)");
-				if (!is("binary")) mismatchOptions = Array.concat(mismatchOptions,"The active image is not binary, so it may require thresholding before analysis");
+				if (!is("binary")) Dialog.addMessage("The active image is not binary, so it may require thresholding before analysis");
 				mismatchOptions = Array.concat(mismatchOptions,"Get me out of here, I am having second thoughts . . .");
 				Dialog.addRadioButtonGroup("ROI mismatch; what would you like to do:_____", mismatchOptions, lengthOf(mismatchOptions), 1, mismatchOptions[0]);
 			Dialog.show();
@@ -223,12 +225,12 @@ function checkForRoiManager() {
 			if (startsWith(mOption,"Clear ROI list and Results Table and reanalyze")) {
 				if (!is("binary")){
 					if (is("grayscale") && bitDepth()>8){
-						proceed = getBoolean("Image is grayscale but not 8-bit, convert it to 8-bit?", "Convert for thresholding", "Get me out of here");
+						proceed = getBoolean(functionL + ": Image is grayscale but not 8-bit, convert it to 8-bit?", "Convert for thresholding", "Get me out of here");
 						if (proceed) run("8-bit");
-						else restoreExit("Goodbye, perhaps analyze first?");
+						else restoreExit(functionL + ": Goodbye, perhaps analyze first?");
 					}
 					if (bitDepth()==24){
-						colorThreshold = getBoolean("Active image is RGB, so analysis requires thresholding", "Color Threshold", "Convert to 8-bit and threshold");
+						colorThreshold = getBoolean(functionL + ": Active image is RGB, so analysis requires thresholding", "Color Threshold", "Convert to 8-bit and threshold");
 						if (colorThreshold) run("Color Threshold...");
 						else run("8-bit");
 					}
@@ -240,10 +242,20 @@ function checkForRoiManager() {
 							setOption("BlackBackground", false);
 							run("Make Binary");
 						}
-						if (is("Inverting LUT"))  {
-							trueLUT = getBoolean("The LUT appears to be inverted, do you want the true LUT?", "Yes Please", "No Thanks");
-							if (trueLUT) run("Invert LUT");
-						}
+					}
+				}
+				if (is("Inverting LUT"))  run("Invert LUT");
+				/* Make sure black objects on white background for consistency */
+				if (bitDepth()!=24){
+					yMax = Image.height-1;	xMax = Image.width-1;
+					cornerPixels = newArray(getPixel(0,0),getPixel(1,1),getPixel(0,yMax),getPixel(xMax,0),getPixel(xMax,yMax),getPixel(xMax-1,yMax-1));
+					Array.getStatistics(cornerPixels, cornerMin, cornerMax, cornerMean, cornerStdDev);
+					if (cornerMax!=cornerMin) restoreExit("cornerMax="+cornerMax+ " but cornerMin=" +cornerMin+ " and cornerMean = "+cornerMean+" problem with image border");
+					/*	Sometimes the outline procedure will leave a pixel border around the outside - this next step checks for this.
+						i.e. the corner 4 pixels should now be all black, if not, we have a "border issue". */
+					if (cornerMean<1 && cornerMean!=-1) {
+						inversion = getBoolean("The corner mean has an intensity of " + cornerMean + ", do you want the intensities inverted?", "Yes Please", "No Thanks");
+						if (inversion) run("Invert");
 					}
 				}
 				if (isOpen("ROI Manager"))	roiManager("reset");
@@ -252,16 +264,19 @@ function checkForRoiManager() {
 					selectWindow("Results");
 					run("Close");
 				}
-				run("Analyze Particles..."); /* Let user select settings */
+				// run("Analyze Particles..."); /* Letting users select settings does not create ROIs  ¯\_(?)_/¯ */
+				run("Analyze Particles...", "display clear include add");
+				nROIs = roiManager("count");
+				nRes = nResults;
 				if (nResults!=roiManager("count"))
-					restoreExit("Results and ROI Manager counts do not match!");
+					restoreExit(functionL + ": Results \(" +nRes+ "\) and ROI Manager \(" +nROIs+ "\) counts still do not match!");
 			}
 			else {
 				if (startsWith(mOption,"Import a saved ROI")) {
 					if (isOpen("ROI Manager"))	roiManager("reset");
-					msg = "Import ROI set \(zip file\), click \"OK\" to continue to file chooser";
+					msg = functionL + ": Import ROI set \(zip file\), click \"OK\" to continue to file chooser";
 					showMessage(msg);
-					pathROI = File.openDialog("Select an ROI file set to import");
+					pathROI = File.openDialog(functionL + ": Select an ROI file set to import");
                     roiManager("open", pathROI);
 				}
 				if (startsWith(mOption,"Import a Results")){
@@ -269,9 +284,9 @@ function checkForRoiManager() {
 						selectWindow("Results");
 						run("Close");
 					}
-					msg = "Import Results Table: Click \"OK\" to continue to file chooser";
+					msg = functionL + ": Import Results Table: Click \"OK\" to continue to file chooser";
 					showMessage(msg);
-					open(File.openDialog("Select a Results Table to import"));
+					open(File.openDialog(functionL + ": Select a Results Table to import"));
 					Table.rename(Table.title, "Results");
 				}
 			}
@@ -279,7 +294,7 @@ function checkForRoiManager() {
 		nROIs = roiManager("count");
 		nRes = nResults; /* Used to check for ROIs:Results mismatch */
 		if(nROIs==0 || nROIs!=nRes)
-			restoreExit("Goodbye, there are " + nROIs + " ROIs and " + nRes + " results; your previous settings will be restored.");
+			restoreExit(functionL + ": Goodbye, there are " + nROIs + " ROIs and " + nRes + " results; your previous settings will be restored.");
 		return roiManager("count"); /* Returns the new count of entries */
 	}
 	function checkForUnits() {  /* Generic version
