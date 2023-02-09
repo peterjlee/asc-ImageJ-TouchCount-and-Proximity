@@ -13,9 +13,10 @@
 	v180831 Corrected missing pixel statement in enlargement.
 	v190725 Corrects missing "}" :-$  Updates all ASC functions. f1 updates colors and replaces binary[-]Check function with toWhiteBGBinary
 	v220823 Consolidated version.
+	v220823-f1 Dead-link correction. Function update
 */
 	requires("1.47r"); /* not sure of the actual latest working version but 1.45 definitely doesn't work */
-	macroL = "Add_Proximity_and_Touch-Count_Min-Dist_to_Results+CZS_v220823.ijm";
+	macroL = "Add_Proximity_and_Touch-Count_Min-Dist_to_Results+CZS_v220823-f1.ijm";
 	saveSettings(); /* To restore settings at the end */
 	/*   ('.')  ('.')   Black objects on white background settings   ('.')   ('.')   */	
 	/* Set options for black objects on white background as this works better for publications */
@@ -23,7 +24,7 @@
 	run("Colors...", "foreground=black background=white selection=yellow"); /* Set the preferred colors for these macros */
 	setOption("BlackBackground", false);
 	run("Appearance...", " "); if(is("Inverting LUT")) run("Invert LUT"); /* do not use Inverting LUT */
-	/*	The above should be the defaults but this makes sure (black particles on a white background) http://imagejdocu.tudor.lu/doku.php?id=faq:technical:how_do_i_set_up_imagej_to_deal_with_white_particles_on_a_black_background_by_default
+	/*	The above should be the defaults but this makes sure (black particles on a white background) https://imagej.net/doku.php?id=faq:technical:how_do_i_set_up_imagej_to_deal_with_white_particles_on_a_black_background_by_default
 	*/
 	t = getTitle();
 	toWhiteBGBinary(t);
@@ -50,15 +51,15 @@
 		expansionsListed = Dialog.getNumber; /* optional number of expansions displayed in the table (you do not have to list any if the min dist is all you want */
 		maxExpansionsD = Dialog.getNumber; /* put a limit of how many expansions before quitting NOTE: the maximum is 255 */
 		wCorr = Dialog.getCheckbox;
-	print("-----\n\n");
-	print("Proximity Count macro \(" + macroL + "\)");
-	print("Image used for count: " + t);
-	print("Original magnification scale factor used = " + lcf + " with units: " + unit);
-	print("Note that separations measured this way are only approximate for large separations.");
+	IJ.log("-----\n\n");
+	IJ.log("Proximity Count macro \(" + macroL + "\)");
+	IJ.log("Image used for count: " + t);
+	IJ.log("Original magnification scale factor used = " + lcf + " with units: " + unit);
+	IJ.log("Note that separations measured this way are only approximate for large separations.");
 	maxExpansions = minOf(maxExpansionsD, iterationLimit); /* Enforce sensible iteration limit */	
-	print("Maximum expansions requested = " + maxExpansionsD + " limited to " + maxExpansions + " or limited by " + expansionsListed + " columns requested in the Results table.");
-	if (wCorr) print("Initial single pixel separation treated as touching i.e. Watershed separated.");
-	createLabeledImage();		/* now create labeling image using ROIs */
+	IJ.log("Maximum expansions requested = " + maxExpansionsD + " limited to " + maxExpansions + " or limited by " + expansionsListed + " columns requested in the Results table.");
+	if (wCorr) IJ.log("Initial single pixel separation treated as touching i.e. Watershed separated.");
+	createLabeledImage("Labeled",imageWidth,imageHeight);		/* now create labeling image using ROIs */
 	roiOriginalCount = roiManager("count");
 	minDistArray = newArray(roiOriginalCount);
 	start = getTime(); /* start timer after last requester for debugging */
@@ -72,7 +73,7 @@
 		minDistArray[i] = -1; /* sets array value so that 1st true entry is flagged */
 		if (wCorr) jStart = 2;
 		else jStart = 1;
-		/* expand roi to include touching objects */
+		/* expand ROI to include touching objects */
 		for (j=jStart ; j<maxExpansions; j++) { /*  if selected above first expansion is just 1 pixel boundary (assuming watershed separation) so start at 2 */
 			selectWindow("Labeled");
 			roiManager("select", i);
@@ -121,12 +122,12 @@
 		}
 	}
 	closeImageByTitle("Labeled");
-	print("Run time = " + (getTime()-start)/1000 + "s");
-	print("-----\n\n");
+	IJ.log("Run time = " + (getTime()-start)/1000 + "s");
+	IJ.log("-----\n\n");
 	restoreSettings();
 	setBatchMode("exit & display"); /* exit batch mode */
-	call("java.lang.System.gc"); 
-	showStatus("Macro Finished: " + roiManager("count") + " objects analyzed in " + (getTime()-start)/1000 + "s.");
+	run("Collect Garbage"); 
+	showStatus("!Proximity Macro Finished: " + roiManager("count") + " objects analyzed in " + (getTime()-start)/1000 + "s.");
 	beep(); wait(300); beep(); wait(300); beep();
 	/*
 		( 8(|)	( 8(|)	ASC Functions	@@@@@:-)	@@@@@:-)
@@ -194,9 +195,10 @@
 			NOTE: Requires ASC restoreExit function, which assumes that saveSettings has been run at the beginning of the macro
 			v220706: Table friendly version
 			v220816: Enforces non-inverted LUT as well as white background and fixes ROI-less analyze.  Adds more dialog labeling.
-			v220823: Extended corner pixel test.
+			v230126: Does not change foreground or background colors.
+			v230130: Cosmetic improvements to dialog.
 			*/
-		functionL = "checkForRoiManager_v220816";
+		functionL = "checkForRoiManager_v230126";
 		nROIs = roiManager("count");
 		nRes = nResults;
 		tSize = Table.size;
@@ -210,7 +212,7 @@
 		}
 		if(nROIs==0 || nROIs!=nRes){
 			Dialog.create("ROI mismatch options: " + functionL);
-				Dialog.addMessage("This macro requires that all objects have been loaded into the ROI manager.\n \nThere are   " + nRes +"   results.\nThere are   " + nROIs +"   ROIs.\nDo you want to:");
+				Dialog.addMessage("This macro requires that all objects have been loaded into the ROI manager.\n \nThere are   " + nRes +"   results.\nThere are   " + nROIs + "   ROIs",12,"#782F40");
 				mismatchOptions = newArray();
 				if(nROIs==0) mismatchOptions = Array.concat(mismatchOptions,"Import a saved ROI list");
 				else mismatchOptions = Array.concat(mismatchOptions,"Replace the current ROI list with a saved ROI list");
@@ -219,7 +221,7 @@
 				mismatchOptions = Array.concat(mismatchOptions,"Clear ROI list and Results Table and reanalyze \(overrides above selections\)");
 				if (!is("binary")) Dialog.addMessage("The active image is not binary, so it may require thresholding before analysis");
 				mismatchOptions = Array.concat(mismatchOptions,"Get me out of here, I am having second thoughts . . .");
-				Dialog.addRadioButtonGroup("ROI mismatch; what would you like to do:_____", mismatchOptions, lengthOf(mismatchOptions), 1, mismatchOptions[0]);
+				Dialog.addRadioButtonGroup("How would you like to proceed:_____", mismatchOptions, lengthOf(mismatchOptions), 1, mismatchOptions[0]);
 			Dialog.show();
 				mOption = Dialog.getRadioButton();
 				if (startsWith(mOption,"Sorry")) restoreExit("Sorry this did not work out for you.");
@@ -240,27 +242,21 @@
 						getThreshold(t1,t2);
 						if (t1==-1)  {
 							run("Auto Threshold", "method=Default");
-							setOption("BlackBackground", false);
-							run("Make Binary");
+							run("Convert to Mask");
+							if (is("Inverting LUT")) run("Invert LUT");
+							if(getPixel(0,0)==0) run("Invert");
 						}
 					}
 				}
 				if (is("Inverting LUT"))  run("Invert LUT");
 				/* Make sure black objects on white background for consistency */
-				if (bitDepth()!=24){
-					yMax = Image.height-1;	xMax = Image.width-1;
-					cornerPixels = newArray(getPixel(0,0),getPixel(1,1),getPixel(0,yMax),getPixel(xMax,0),getPixel(xMax,yMax),getPixel(xMax-1,yMax-1));
-					Array.getStatistics(cornerPixels, cornerMin, cornerMax, cornerMean, cornerStdDev);
-					if (cornerMax!=cornerMin) restoreExit("cornerMax="+cornerMax+ " but cornerMin=" +cornerMin+ " and cornerMean = "+cornerMean+" problem with image border");
-					/*	Sometimes the outline procedure will leave a pixel border around the outside - this next step checks for this.
-						i.e. the corner 4 pixels should now be all black, if not, we have a "border issue". */
-					if (cornerMean<1 && cornerMean!=-1) {
-						inversion = getBoolean("The corner mean has an intensity of " + cornerMean + ", do you want the intensities inverted?", "Yes Please", "No Thanks");
-						if (inversion) run("Invert");
-					}
-				}
+				cornerPixels = newArray(getPixel(0, 0), getPixel(0, 1), getPixel(1, 0), getPixel(1, 1));
+				Array.getStatistics(cornerPixels, cornerMin, cornerMax, cornerMean, cornerStdDev);
+				if (cornerMax!=cornerMin) restoreExit("Problem with image border: Different pixel intensities at corners");
+				/*	Sometimes the outline procedure will leave a pixel border around the outside - this next step checks for this.
+					i.e. the corner 4 pixels should now be all black, if not, we have a "border issue". */
+				if (cornerMean==0) run("Invert");
 				if (isOpen("ROI Manager"))	roiManager("reset");
-				setOption("BlackBackground", false);
 				if (isOpen("Results")) {
 					selectWindow("Results");
 					run("Close");
@@ -301,15 +297,16 @@
 	function checkForUnits() {  /* With CZSEM check Version
 		/* v161108 (adds inches to possible reasons for checking calibration)
 			This version requires these functions:
-			checkForPlugin, setScaleFromCZSemHeader.
+			***** checkForPlugin, setScaleFromCZSemHeader, restoreExit *****
+			NOTE: REQUIRES ASC  function which requires previous run of saveSettings
 			v180820 Checks for CZ header before offering to use it.
 			v200508 Simplified
 			v200925 Checks also for unit = pixels
-		NOTE: REQUIRES ASC restoreExit function which requires previous run of saveSettings
-		*/
+		*/ 
+		functionL = "checkForUnits_v210428";
 		getPixelSize(unit, pixelWidth, pixelHeight);
 		if (pixelWidth!=pixelHeight || pixelWidth==1 || unit=="" || unit=="inches" || unit=="pixels"){
-			Dialog.create("Suspicious Units");
+			Dialog.create("Suspicious Units: " + functionL);
 			rescaleChoices = newArray("Define new units for this image", "Use current scale", "Exit this macro");
 			tiff = matches(getInfo("image.filename"),".*[tT][iI][fF].*");
 			if (matches(getInfo("image.filename"),".*[tT][iI][fF].*") && (checkForPlugin("tiff_tags.jar"))) {
@@ -349,64 +346,60 @@
 		}
 		if (isOpen(oIID)) selectImage(oIID);
 	}
-	function createLabeledImage() {
-		/* v200306 requires restoreExit function
-		NOTE: REQUIRES ASC restoreExit function which requires previous run of saveSettings		*/
+	function createLabeledImage(newTitle,imageWidth,imageHeight) {
+	/* v180305 requires cleanExit function
+		v230130 replace Add with Set value, added newTitle,imageWidth,imageHeight inputs
+	*/
+		batchMode = is("Batch Mode"); /* Store batch status mode before toggling */
+		if (!batchMode) setBatchMode(true); /* Toggle batch mode on if previously off */
 		labels = roiManager("count");
-		if (labels==0) restoreExit("Sorry, this macro labels using ROI Manager objects, try the Landini plugin instead.");
-		if (labels>=65536) restorExit("The labeling function is limited to 65536 objects");
-		if (labels<=253)	newImage("Labeled", "8-bit black", imageWidth, imageHeight, 1);
+		if (labels==0) cleanExit("Sorry, this macro labels using ROI Manager objects, try the Landini plugin instead.");
+		if (labels>=65536) cleanExit("The labeling function is limited to 65536 objects");
+		if (labels<=253)	newImage(newTitle, "8-bit black", imageWidth, imageHeight, 1);
 		else newImage("Labeled", "16-bit black", imageWidth, imageHeight, 1);
-		for (i=0 ; i<labels; i++) {
+		for (i=0,labelValue=1 ; i<labels; i++,labelValue++) {
 			roiManager("select", i);
-			labelValue = i+1;
-			run("Add...", "value=[labelValue]");
+			run("Set...", "value=[labelValue]");
 			if (nResults==labels) setResult("Label\(Int\)", i, labelValue);
 		}
 		run("Select None");
+		if (!batchMode) setBatchMode("exit and display");
 	}
 	function removeEdgeObjects(){
 	/*	Remove black edge objects without using Analyze Particles
 	Peter J. Lee  National High Magnetic Field Laboratory
-	Requires:
-		The versatile wand tool: https://imagej.nih.gov/ij/plugins/versatile-wand-tool/index.html by Michael Schmid as built in wand does not select edge objects
-		checkForEdgeObjects function
 	Optional: morphology_collection.jar
 	1st version v190604
-	v190605 This version uses Gabriel Landini's morphology plugin if available.
-	v190725 Checks for edges first and then returns "true" if edge objects removed.
+	v190605 This version uses Gabriel Landini's morphology plugin if available
 	v200102 Removed unnecessary print command.
-	NOTE: REQUIRES ASC restoreExit function which requires previous run of saveSettings
+	v230106 Does not require versatile wand
 	*/
-		if (checkForEdgeObjects()) { /* requires checkForEdgeObjectsFunction */
-			if (checkForPlugin("morphology_collection.jar")) run("BinaryKillBorders ", "top right bottom left");
-			else {
-				if (!checkForPlugin("Versatile_Wand_Tool.java") && !checkForPlugin("versatile_wand_tool.jar") && !checkForPlugin("Versatile_Wand_Tool.jar")) restoreExit("Versatile wand tool required");
-				run("Select None");
-				originalBGCol = getValue("color.background");
-				cWidth = getWidth()+2; cHeight = getHeight()+2;
-				run("Canvas Size...", "width=&cWidth height=&cHeight position=Center");
-				setColor("black");
-				drawRect(0, 0, cWidth, cHeight);
-				call("Versatile_Wand_Tool.doWand", 0, 0, 0.0, 0.0, 0.0, "8-connected");
-				run("Colors...", "background=white");
-				run("Clear", "slice");
-				setBackgroundColor(originalBGCol); /* Return background to original color */
-				makeRectangle(1, 1, cWidth-2, cHeight-2);
-				run("Crop");
-			}
-			showStatus("Remove_Edge_Objects function complete");
-			removeObjects = true;
+		if (checkForPlugin("morphology_collection.jar")) run("BinaryKillBorders ", "top right bottom left");
+		else {
+			run("Select None");
+			originalFGCol = getValue("color.foreground");
+			cWidth = getWidth()+2; cHeight = getHeight()+2;
+			run("Canvas Size...", "width=&cWidth height=&cHeight position=Center");
+			setColor("black");
+			drawRect(0, 0, cWidth, cHeight);
+			run("Colors...", "foreground=white");
+			floodFill(0, 0);
+			setForegroundColor(originalFGCol); /* Return background to original color */
+			makeRectangle(1, 1, cWidth-2, cHeight-2);
+			run("Crop");
+			run("Select None");
 		}
-		else removeObjects = false;
-		return removeObjects;
+		showStatus("Remove_Edge_Objects function complete");
 	}
-	function restoreExit(message){ /* v220316
-		NOTE: REQUIRES previous run of saveSettings	*/
+	function restoreExit(message){ /* Make a clean exit from a macro, restoring previous settings */
+		/* 9/9/2017 added Garbage clean up suggested by Luc LaLonde - LBNL
+		v220316 if message is blank this should still work now
+		NOTE: REQUIRES previous run of saveSettings		*/
 		restoreSettings(); /* Restore previous settings before exiting */
 		setBatchMode("exit & display"); /* Probably not necessary if exiting gracefully but otherwise harmless */
 		call("java.lang.System.gc");
-		exit(message);
+		if (message!="") exit(message);
+		else exit;
 	}
 	function setScaleFromCZSemHeader() {
 	/*	This very simple function sets the scale for SEM images taken with the Carl Zeiss SmartSEM program. It requires the tiff_tags plugin written by Joachim Wesner. It can be downloaded from http://rsbweb.nih.gov/ij/plugins/tiff-tags.html
