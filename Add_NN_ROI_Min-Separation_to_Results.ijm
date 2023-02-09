@@ -16,22 +16,98 @@
 	v220708 Now works for color images assuming ROI set has already been created but requires new createROIBinaryImage function. Added more time diagnostics - v220710
 	v220720 Adds option to save ROI object numbers for nearest neighbor cluster.
 	v220816 If pixel sampling is chosen the adjacent array coordinates will also be sampled.
-	v220817 Added dialog option to control re-sampling range and consolidated labeling dialogs. This variant does not use CLIJ. f1: updated check-for-plugin function
+	v220817 Added dialog option to control re-sampling range and consolidated labeling dialogs. This variant does not use CLIJ. Updated check for plugin function.
+	v230105-6 Quick fix for sub-sampling issue on very large images with high object counts (not fully tested).
+	v230120 Fixed a typo that crashed macro on 1st memory flush! v230124: Minor syntax optimization.
+	v230121-9 Saves last run enabling easier restart. More robust resampling produced much faster analysis without reducing accuracy. Restored ASC default background (white) and foreground (black) throughout for consistency.
+	v230130-1: File save check changed from File.exists to File.length>0 as a more reliable indicator of a successful save.
 	*/
-	macroL = "Add_NN_ROI_Min-Separation_to_Results_v220817-f1";
-	requires("1.47r"); /* not sure of the actual latest working version but 1.45 definitely doesn't work */
-	memFlush(200); /* This macro needs all the help it can get */
-	saveSettings(); /* To restore settings at the end */
+	macroL = "Add_NN_ROI_Min-Separation_to_Results_v230131.ijm";
 	setBatchMode(true);
+	requires("1.47r"); /* not sure of the actual latest working version but 1.45 definitely doesn't work */
+	saveSettings(); /* To restore settings at the end */
+	prefsNameKey = "asc.NN.ROI.sep.Prefs.";
+	/* set the following standard ASC foreground and background colors for consistency */
+	run("Colors...", "foreground=black background=white selection=yellow");
+	prevRunImage = verifiedGetSet("get",prefsNameKey+"LastRunImage",false,"");
+	/* (setOrGet,key,altPath) setOrGet should be "set" or "get", key is the full prefs key (the key should end in "Image", "Results", or "ROIs") */
+	prevRunROI = verifiedGetSet("get",prefsNameKey+"LastRunROIs",false,"");
+	prevRunResults = verifiedGetSet("get",prefsNameKey+"LastRunResults",false,"");
+	prefsDelimiter = "|";
+	plusminus = fromCharCode(0x00B1);
+	leq = fromCharCode(0x2264);
+	dateCode = getDateCode();
 	setOption("ExpandableArrays", true); /* In ImageJ 1.53g and later, arrays automatically expand in size as needed */
-	run("Appearance...", " "); if(is("Inverting LUT")) run("Invert LUT"); /* do not use Inverting LUT */
-	/*	The above should be the defaults but this makes sure (black particles on a white background) http://imagejdocu.tudor.lu/doku.php?id=faq:technical:how_do_i_set_up_imagej_to_deal_with_white_particles_on_a_black_background_by_default
+	/*	The above should be the defaults but this makes sure (black particles on a white background) https://imagej.net/doku.php?id=faq:technical:how_do_i_set_up_imagej_to_deal_with_white_particles_on_a_black_background_by_default
 	*/
 	imageN = nImages;
-	if (imageN==0) restoreExit("Sorry, this macro needs at least one open image open");
-	else t = getTitle();
-	if (removeEdgeObjects() && roiManager("count")!=0) roiManager("reset"); /* macro does not make much sense if there are edge objects but perhaps they are not included in ROI list (you can cancel out of this). if the object removal routine is run it will also reset the ROI Manager list if it already contains entries */
+	nROIs = roiManager("count");
+	nRes = nResults;
+	if (imageN==0 || nROIs==0 || nRes==0){
+		if(prevRunImage!="" && prevRunROI!="" && prevRunResults!=""){ /* Looks for a previous run to restore */
+			Dialog.create(macroL + ": Continuation options");
+			preOptions = newArray("Just exit the macro","Use files selected below","Skip reloading files and continue with macro to generate new ROIs and Results");
+			Dialog.addRadioButtonGroup(imageN + "images, " + nROIs + " ROIs, and " + nRes + " results are open but there is a previous run that can be restored:",preOptions,3,1,preOptions[1]);
+			Dialog.addCheckbox("Open image file below",1-minOf(imageN,1));
+			Dialog.addFile("Restore previous run image:",prevRunImage);
+			Dialog.addCheckbox("Open ROI set below",1-minOf(nROIs,1));
+			Dialog.addFile("Previous run ROI set:",prevRunROI);
+			Dialog.addCheckbox("Open Results below",1-minOf(nRes,1));
+			Dialog.addFile("Previous run Results table:",prevRunResults);
+			Dialog.show();
+			preOption = Dialog.getRadioButton();
+			if (startsWith(preOption,"Just")) restoreExit("Goodbye, see you again soon");
+			else if(startsWith(preOption,"Use")){
+				restoreImage = Dialog.getCheckbox();
+				restoreImagePath = Dialog.getString();
+				restoreROIs = Dialog.getCheckbox();
+				restoreROIPath = Dialog.getString();
+				restoreResults = Dialog.getCheckbox();
+				restoreResultsPath = Dialog.getString();
+				if (File.exists(restoreImagePath)){
+					if (File.length(restoreImagePath)>0 && restoreImage){
+						IJ.log("Image restored from: " + restoreImagePath);
+						open(restoreImagePath);
+					}
+				}
+				if (File.exists(restoreROIPath)){
+					if (File.length(restoreROIPath)>0 && restoreROIs){
+						if (nROIs>0){
+							roiManager("reset");
+							IJ.log("Previous " + nROIs + " ROIs replaced from: " + restoreROIPath);
+						}
+						else IJ.log("ROIs restored from:\n" + restoreROIPath);
+						roiManager("open", restoreROIPath);
+					}
+				}
+				if (File.exists(restoreResultsPath)){
+					if (File.length(restoreResultsPath)>0 && restoreResults){
+						IJ.log("Results table restored from:\n" + restoreResultsPath);
+						File.open(restoreResultsPath);
+					} 
+				}
+			}
+		}
+		if (nImages==0) File.openDialog("At least one open image is required, please select one");
+		imageN = nImages;
+		nROIs = roiManager("count");
+		nRes = nResults;
+	}
+	if (imageN==0) restoreExit("Sorry, failure to find or restore previous images");
+	else{
+		t = getTitle();
+		fileNameNE = File.getNameWithoutExtension(t);
+		defImagePath = getDir("image");
+		null = verifiedGetSet("set",prefsNameKey+"LastRunImage",false,"");
+	} 
+	if (checkForEdgeObjects() && roiManager("count")!=0){
+		if (getBoolean("There are edge objects AND ROIs; Do you want to remove the edge objects and reset the ROIs?")) {
+			roiManager("reset");
+			removeBlackEdgeObjects;
+		}
+	}  /* macro does not make much sense if there are edge objects but perhaps they are not included in ROI list (you can cancel out of this). if the object removal routine is run it will also reset the ROI Manager list if it already contains entries */
 	nROIs = checkForRoiManager();
+	overlayN = Overlay.size;
 	fCycles = floor(nROIs/10); /* How frequently to check memory usage */
 	run("Options...", "count=1 do=Nothing"); /* The binary count setting is set to "1" for consistent outlines */
 	imageWidth = getWidth();
@@ -40,39 +116,46 @@
 	dimSum = imageWidth+imageHeight;
 	checkForUnits();
 	getPixelSize(unit, pixelWidth, pixelHeight);
-	lcf=(pixelWidth+pixelHeight)/2; /* ---> add here the side size of 1 pixel in the new calibrated units (e.g. lcf=5, if 1 pixels is 5mm) <--- */
+	lcf = (pixelWidth+pixelHeight)/2; /* ---> add here the side size of 1 pixel in the new calibrated units (e.g. lcf=5, if 1 pixels is 5mm) <--- */
+	lcfSq = pow(lcf,2);
 	/* create the dialog prompt */
 	selectResultsWindow(); /* allows you to choose from multiple windows */
 	if(!isNaN(Table.get("Perim.",0))) Array.getStatistics(Table.getColumn("Perim."), minPerim, maxPerim, meanPerim, null) ;
 	else exit("Sorry, Perim values in table are needed for this macro");
+	reRun = false;
 	if(!isNaN(Table.get("MinSepROI1",0))){
-		for (i=0;i<nROIs;i++){
-			MinSepROI1s = Table.getColumn("MinSepROI1");
-			if (isNaN(MinSepROI1s[i])) i = nROIs;
-			else lastMinSepROI = i;
+		MinSepROI1s = Table.getColumn("MinSepROI1");
+		showStatus("Finding last measured object");
+		for (i=0,foundNaN=false;i<nROIs && !foundNaN;i++){
+			showProgress(i,nROIs);
+			if (isNaN(MinSepROI1s[i])){
+				foundNaN=true;
+				reRun = true;
+				lastMinSepROI = i-1;
+			}
 		}
-		reRun = true;
 	}
-	else reRun = false;
 	/* Create a new image for just the ROIs allowing you to color an original color image or one with other perhaps a scale bar that interferes with the bounding box */
-	createROIBinaryImage(t,t+"_ROIBinary");
+	createROIImage(t+"_ROIBinary",imageWidth,imageHeight,false,false,0,false);
+	/* options: newTitle,imageWidth,imageHeight,blackBackground,labelObjects,expandN,hollow;  blackBackground and labelObjects options are true-false */
 	selectWindow(t+"_ROIBinary");
-	run("Select None");
-	call("Versatile_Wand_Tool.doWand", 0, 0, 0.0, 0.0, 0.0, "8-connected");
-	run("Make Inverse");
+	run("Select Bounding Box");
 	getSelectionBounds(minBX, minBY, widthB, heightB);
 	maxBX = minBX + widthB;
 	maxBY = minBY + heightB;
 	run("Select None");
-	destPixSkip = maxOf(1,minOf(floor(minPerim/(20*lcf)),floor(dimProd/500000)));
 	totalPL = nROIs * meanPerim;
 	totalPPx = round(totalPL/lcf);
 	maxPerimPx = maxPerim/lcf;
+	minPerimPx = minPerim/lcf;
+	orPixSkip = round(minPerimPx/12);
+	destPixSkip = round(minPerimPx/12);
+	resamplePx = round(maxPerimPx/6);
 	dLW = maxOf(1,round(imageWidth/1024)); /* default line width */
-	leq = fromCharCode(0x2264);
 	nResamplingSuccess = 0;
-	totalMinDist = 0;
-	prefsNameKey = "asc.NN.ROI.sep.Prefs.";
+	totalMinDistPx = 0;
+	memFlush(200); /* This macro needs all the help it can get */
+	run("Appearance...", " "); if(is("Inverting LUT")) run("Invert LUT"); /* For consistency this macro does not use Inverting LUTs */
 	Dialog.create("Options for: " + macroL);
 		Dialog.addMessage("Bounding box for all objects: x = " + minBX + "-" + maxBX + ", y = "  + minBY + "-" + maxBY);
 		if(reRun){
@@ -83,34 +166,45 @@
 		Dialog.addNumber("No. of object distance sets \("+leq+"6\) to be added to Results Table:", 1, 0, 6,"of " + nROIs + " ROIs");
 		Dialog.addNumber("No. of adjacent ROIs \(by centroid\) to included in search:", minOf(6,nROIs-1), 0, 6,"adjacent ROIs");
 		Dialog.addCheckbox("Add column listing adjacent ROIs selected above",true); /* Could be used for cluster analysis */
-		Dialog.addMessage("This brute force approach is a little slow but it can be\nsped up by sub-sampling the perimeter points:");
-		Dialog.addNumber("Sampling of origin outline pixels in initial search:", destPixSkip, 0, 3,"pixels skipped");
-		Dialog.addNumber("Sampling of nearest neighbor ROI perimeter pixels in initial search:", destPixSkip, 0, 3,"pixels skipped");
-		Dialog.addMessage("In testing, single pixel skipping combined with 20% re-sampling introduced in an error of >0.02%");
-		Dialog.addNumber("Full re-sampling of adjacent array indices after sub-sampling above:", 20, 0, 3,"% of array");
-		Dialog.addCheckbox("Draw connectors showing shortest distance",false);
-		Dialog.addCheckbox("Remove previous overlays?",true);
+		Dialog.addCheckbox("Add \(WIDE!\) column listing adjacent center-center distances for adjacent ROIs",false); /* Could be used for cluster analysis */
+		Dialog.addMessage("This brute force approach is a little slow but it can be sped up by x3 \nby sub-sampling the perimeter points based in the minimum perimeter/12:");
+		Dialog.addNumber("Random sampling of origin outline pixels in initial search:", orPixSkip, 0, 3,"pixels skipped");
+		Dialog.addNumber("Random sampling of nearest neighbor ROI perimeter pixels in initial search:", destPixSkip, 0, 3,"pixels skipped");
+		Dialog.addMessage("Default resampling below using the default maximum perimeter/6 and the \ndefault values typically restores full accuracy");
+		Dialog.addNumber("Full random re-sampling of adjacent array indices after sub-sampling above:",resamplePx, 0, 3,plusminus+"pixels");
+		Dialog.addCheckbox("Draw connectors showing shortest distance \(no significant impact on time\)",false);
+		Dialog.addMessage("Because the coordinates are shuffled each run, different connections may be\ndrawn each run if there is more than one closest location pair");
+		if(overlayN>0) Dialog.addCheckbox("Remove previous " + overlayN + " overlays?",true);
 		Dialog.addMessage("This macro can use a lot of memory, the current memory usage is " + IJ.freeMemory());
-		Dialog.addCheckbox("Run with memory and additional time reporting",false);
+		Dialog.addCheckbox("Run with memory and additional time reporting \(no significant time increase\)",false);
+		Dialog.addCheckbox("Run in debug mode \(very slow\)",false);
 	Dialog.show;
 		startObject = minOf(nROIs-1,Dialog.getNumber());
 		maxTableObjects = minOf(nROIs-1,Dialog.getNumber); /* put a limit of how many adjacent filaments to report */
 		maxNNROIs = minOf(nROIs-1,Dialog.getNumber);
 		nnROIL = Dialog.getCheckbox();
+		nnROIDL = Dialog.getCheckbox();
 		outlinePixSkip = Dialog.getNumber();
 		destPixSkip = Dialog.getNumber();
-		resampleF =  Dialog.getNumber()/200;
+		resamplePx =  Dialog.getNumber();
 		drawConnector = Dialog.getCheckbox();
-		if (Dialog.getCheckbox()) Overlay.remove;
+		if(overlayN>0) removePreviousOverlays = Dialog.getCheckbox();
+		else removePreviousOverlays = false;
 		mDiagnostics = Dialog.getCheckbox();
+		debugMode = Dialog.getCheckbox();
+	if(debugMode) setBatchMode("exit & display"); /* exit batch mode */
+	if (removePreviousOverlays){
+		selectWindow(t);
+		while(Overlay.size>0) Overlay.remove;
+		selectWindow(t+"_ROIBinary");
+	} 
 	if (drawConnector){
 		colorChoicesMono = newArray("white", "black", "off-white", "off-black", "light_gray", "gray", "dark_gray");
-		colorChoicesStd = newArray("red", "green", "blue", "cyan", "magenta", "yellow", "pink", "orange", "violet", "violet");
+		colorChoicesStd = newArray("red", "green", "blue", "cyan", "magenta", "yellow", "pink", "orange", "violet");
 		colorChoicesMod = newArray("garnet", "gold", "aqua_modern", "blue_accent_modern", "blue_dark_modern", "blue_modern", "blue_honolulu", "gray_modern", "green_dark_modern", "green_modern", "green_modern_accent", "green_spring_accent", "orange_modern", "pink_modern", "purple_modern", "red_n_modern", "red_modern", "tan_modern", "violet_modern", "yellow_modern");
 		colorChoicesNeon = newArray("jazzberry_jam", "radical_red", "wild_watermelon", "outrageous_orange", "supernova_orange", "atomic_tangerine", "neon_carrot", "sunglow", "laser_lemon", "electric_lime", "screamin'_green", "magic_mint", "blizzard_blue", "dodger_blue", "shocking_pink", "razzle_dazzle_rose", "hot_magenta");
 		colorChoices = Array.concat(colorChoicesMono,colorChoicesStd,colorChoicesMod,colorChoicesNeon);
 		defaultColorOrder = Array.trim(colorChoicesStd,6);
-		prefsDelimiter = "|";
 		colorString = call("ij.Prefs.get", prefsNameKey+"LineColors","red|cyan|pink|green|blue|yellow");
 		colorPrefs = split(colorString, prefsDelimiter);
 		colorPrefs = Array.concat(colorPrefs,defaultColorOrder);
@@ -167,10 +261,8 @@
 		animStack = false;
 	}
 	if (createLegend)	closeImageByTitle("Legend"); /* Close previous legend */
-	start = getTime();
-	IJ.log("-----\n\n");
-	IJ.log("Macro: " + macroL);
-	IJ.log("Image used for count: " + t);
+	startTime = getTime();
+	IJ.log("-----\n\nMacro: " + macroL + "\n_____________\nImage used for count: " + t);
 	IJ.log("Original magnification scale factor used = " + lcf + " with units: " + unit);
 	IJ.log("Maximum object separations to be added to table = " + maxTableObjects);
 	if (outlinePixSkip>0) IJ.log(outlinePixSkip + " outline pixels skipped in initial search");
@@ -184,47 +276,58 @@
 	}
 	selectWindow(t+"_ROIBinary");
 	run("Select None");
-	/* Create Inline (perimeter pixels within object) of Perimeter image for all objects */
+	/* Generate outline pixel coordinate arrays and matching object labels */
+	/* 			Part 1: Create Inline (perimeter pixels within object) of Perimeter image for all objects */
 	run("Duplicate...", "title=binaryInline");
 	if(!is("binary")){
-		setOption("BlackBackground", false);
 		run("Convert to Mask");
 		if (is("Inverting LUT")) run("Invert LUT");
 		if(getPixel(0,0)==0) run("Invert");
 	}
-	run("Outline");
-	createROILabeledImage("binaryInline","LabeledOutline");		/* now create labeled image using ROIs */
+	/* Created binaryInline is black image with a white interior border around each of the ROIs */
+	createROIImage("labeledInline",imageWidth,imageHeight,true,true,-1,true);
+	/* function options: newTitle,imageWidth,imageHeight,blackBackground,labelObjects,expandN,hollow;  blackBackground and labelObjects options are true-false */
 	/* Arrays containing all inLine pixel coordinates and ROI-mapped intensities - with optional sub-sampling */
-	allInlinePxXs = newArray(0);
-	allInlinePxYs = newArray(0);
-	bgI = getPixel(0, 0); /* Determine background intensity as corner pixel */
-	oPxls = 0; /* Counter for outline/inline pixels */
+	allInlinePxXs = newArray(); /* All inline pixels: x coordinates */
+	allInlinePxYs = newArray(); /* All inline pixels: y coordinates */
+	allInlinePxROIs = newArray(); /* All inline pixels: ROI labels */
 	/* Get all perimeter coordinates */
-	allInlinePxROIs = newArray(0);
-	for (iC=minBX; iC<maxBX; iC++){
-		showProgress(iC, widthB);
-		showStatus("Acquiring all perimeter coordinates");
-		for (jC=minBY; jC<maxBY; jC++){
-			pixelI = getPixel(iC, jC);
-			if(pixelI!=bgI) {
-				allInlinePxXs[oPxls] = iC;
-				allInlinePxYs[oPxls] = jC;
-				allInlinePxROIs[oPxls] = pixelI;
-				oPxls += 1;
+	showStatus("Acquiring all perimeter coordinates and ROI-ID-labels");
+	for (x=minBX,oPxls=0; x<maxBX; x++){  /* oPxls is Counter for outline/inline pixels */
+		showProgress(x, maxBX);
+		showStatus("Acquiring all perimeter coordinates and ROI-ID-labels");
+		for (y=minBY; y<maxBY; y++){
+			pixelIntInline = getPixel(x, y);
+			if(pixelIntInline!=0) { /* The ROI labeled image should be black with each ROI adding 1 intensity value so ROI[0] should have an intensity of 1 */
+				allInlinePxXs[oPxls] = x;
+				allInlinePxYs[oPxls] = y;
+				allInlinePxROIs[oPxls] = pixelIntInline - 1; /* Each intensity value is the ROI# starting at 1 but ROI selection i number starts at zero */ 
+				oPxls++;
 			}
 		}
 	}
 	IJ.log("Total perimeter pixels = " + totalPPx + " \(original perimeter: " + totalPL + " " + unit + "\)");
 	IJ.log("Total perimeter coordinate sets = " + oPxls);
-	closeImageByTitle("binaryInline");
-	closeImageByTitle("LabeledOutline");
-	closeImageByTitle(t+"_ROIBinary");
+	if(!debugMode){
+		closeImageByTitle("binaryInline");
+		closeImageByTitle("labeledInline");
+		closeImageByTitle(t+"_ROIBinary");
+	}
+	if (destPixSkip>0){
+		/* randomize coordinates for better subsampling later */
+		showStatus("Shuffling all destination coordinates");
+		randomIndexArray = createRandomIndexArray(oPxls);
+		Array.sort(randomIndexArray, allInlinePxXs, allInlinePxYs,allInlinePxROIs);
+		showStatus("Finished shuffling all destination coordinates");
+	}
 	selectWindow(t);
 	run("Select None");
 	/* Catch up on drawing lines from previous start */
 	if (startObject>0 && drawConnector){
+		showStatus("Redrawing previously determined lines");
 		for (i=0; i<startObject; i++){
-			for (n=0; n<maxTableObjects; n++){
+		showProgress(i,startObject);
+		for (n=0; n<maxTableObjects; n++){
 				minXOL = getResult("MinSepThisROIx"+(n+1), i);
 				minYOL = getResult("MinSepThisROIy"+(n+1), i);
 				minXL = getResult("MinSepNNROIx"+(n+1), i);
@@ -238,168 +341,211 @@
 			}
 		}
 	}
+	tempROIpath = defImagePath + "_tempROIs_" + dateCode + ".zip";
+	/* the ROI manager randomly clears so this is part of a workaround for that */
+	tempROIpath = verifiedGetSet("set",prefsNameKey+"tempROIs",true,tempROIpath);
+	if (tempROIpath=="") IJ.log("Warning: ROI manager has been cleared");
 	oCXs = Table.getColumn("X");
 	oCYs = Table.getColumn("Y");
-	oCDSqs = newArray(0);
 	if(nnROIL) nnROIsList = newArray();
-	flushCount = 0;
-	for (oROI=startObject; oROI<nROIs; oROI++){
-		oCDSqs = newArray(0);
+	if(nnROIDL) nnROIDsList = newArray();
+	startSearch = getTime();
+	for (oROI=startObject,flushCount=0; oROI<nROIs; oROI++){
 		showProgress(oROI, nROIs);
-		showStatus("!Looping through "+ oROI + " of all " + nROIs);
-		/* Create set of true ROI outline coordinates */
-		newImage("ROIOutline", "8-bit black", imageWidth, imageHeight, 1);
+		timeLeft = getTimeLeftTxt(startSearch,startObject,oROI,nROIs);
+		if (oROI==startObject) statusMessageNNSearch = "Analyzing object "+ oROI + " out of " + nROIs;
+		else statusMessageNNSearch = "Analyzing object "+ oROI + " out of " + nROIs + ", time left: " + timeLeft;
+		showStatus(statusMessageNNSearch);
+		/* Create set of true ROI outline (line external to object) coordinates - distances are measure inline-to-outline
+		They are created here for each individual ROI because outlines of adjacent ROIs may overlap.
+		*/
+		newImage("ROIOutline", "8-bit white", imageWidth, imageHeight, 1);
+		run("Select None");
 		roiManager("Select", oROI);
-		run("Clear", "slice");
-		Roi.getBounds(xMin, yMin, roiWidth, roiHeight);
-		outlinePxXs = newArray(0);
-		outlinePxYs = newArray(0);
+		run("Enlarge...", "enlarge=1 pixel");
+		getSelectionBounds(xMin, yMin, outWidth, outHeight);
+		run("Set...", "value=0");
+		roiManager("Select", oROI);
+		run("Set...", "value=255");
+		run("Select None");
+		outlinePxXs = newArray();
+		outlinePxYs = newArray();
 		xMin -= 1;	yMin -= 1; /* Adjust bounds for Outline */
-		xMax = xMin + roiWidth + 2;
-		yMax = yMin + roiHeight + 2;
-		run("Select None");
-		run("Outline");
-		roiManager("Select", oROI);
-		run("Enlarge...", "enlarge=1");
-		run("Clear Outside"); /* Removes outline of image border */
-		run("Select None");
-		bgI = getPixel(0, 0);
-		rPxls = 0;
-		for (iM=xMin; iM<xMax; iM++){
+		xMax = xMin + outWidth + 2;
+		yMax = yMin + outHeight + 2;
+		for (iM=xMin,rPxls=0; iM<xMax; iM++){
 			for (jM=yMin; jM<=yMax; jM++){
-				pixelI = getPixel(iM, jM);
-				if(pixelI != bgI) {
+				pixelIntROIOut = getPixel(iM, jM);
+				if(pixelIntROIOut==0) {  /* Only the "outline" should be black */
 					outlinePxXs[rPxls] = iM;
 					outlinePxYs[rPxls] = jM;
-					rPxls += 1;
+					rPxls++;
 				}
 			}
 		}
-		closeImageByTitle("ROIOutline");
+		if (outlinePixSkip>0){
+			/* randomize coordinates for better sub-sampling later */
+			randomIndexArray = createRandomIndexArray(rPxls);
+			Array.sort(randomIndexArray, outlinePxXs, outlinePxYs);
+		}
+		if(!debugMode) closeImageByTitle("ROIOutline");
 		/* End of Outline coordinate set creation */
 		selectWindow(t);
 		/* Filter inline destination coordinate set so that it only includes adjacent ROIs */
 			/* First create a list of the distances to all the other ROI centers */
-		for(iO=0; iO<nROIs; iO++){
-			if (iO!=oROI)	oCDSqs[iO] = pow(oCXs[oROI]-oCXs[iO],2) + pow(oCYs[oROI]-oCYs[iO],2);
-			else oCDSqs[iO] = dimProd; /* just something large enough to eliminate oROI from the sort */
-		}
-		nnROIs = Array.rankPositions(oCDSqs); /* sort list of other ROIs by center-center distance-squared */
-		/* Filter coordinate arrays so they only include nearest ROIs limited by dialog option creating new filter arrays */
-		allInlinePxXsF = newArray(0);
-		allInlinePxYsF = newArray(0);
-		allInlinePxROIsF = newArray(0);
-		oPxlsF = 0;
-		nnROILString = "";
-		for (n=0; n<maxNNROIs; n++){
-			nnROI = nnROIs[n];
-			if (nnROIL){
-				nnROILString += d2s(nnROI,0);
-				if(n<maxNNROIs-1) nnROILString += "|";
+		oCDSqs = newArray();
+		// iL=0; //?
+		nnROIs = newArray();
+		for(iO=0,c=0;iO<nROIs; iO++){
+			if (iO!=oROI){	
+				oCDSqs[c] = pow(oCXs[oROI]-oCXs[iO],2) + pow(oCYs[oROI]-oCYs[iO],2);
+				nnROIs[c] = iO;
+				c++;
 			}
+		}
+		Array.sort(oCDSqs,nnROIs);
+		oCDSqs = Array.trim(oCDSqs,maxNNROIs);
+		nnROIs = Array.trim(nnROIs,maxNNROIs);
+		if (debugMode){
+			Array.print(nnROIs);
+			Array.print(oCDSqs);
+		}
+		/* Filter coordinate arrays so they only include nearest ROIs limited by dialog option creating new filter arrays */
+		allInlinePxROIsF = newArray(); /* NN ROIs only */
+		allInlinePxXsF = newArray(); /* NN x Coords only */
+		allInlinePxYsF = newArray(); /* NN y Coords only */
+		oPxlsF = 0;
+		nnROILString="";
+		nnROIDLString="";
+		for (n=0; n<maxNNROIs; n++){
+			if (nnROIL) nnROILString += "" + nnROIs[n] + "|";
+			if (nnROIDL) nnROIDLString += "" + d2s(sqrt(oCDSqs[n]),1) + "|";
 			for (f=0; f<oPxls; f++){
-				if (allInlinePxROIs[f]==nnROI) {
+				if (allInlinePxROIs[f]==nnROIs[n]) {
 					allInlinePxXsF[oPxlsF] = allInlinePxXs[f];
 					allInlinePxYsF[oPxlsF] = allInlinePxYs[f];
-					allInlinePxROIsF[oPxlsF] = nnROI;
-					oPxlsF += 1;
+					allInlinePxROIsF[oPxlsF] = nnROIs[n];
+					oPxlsF++;
 				}
 			}
 		}
-		if (nnROIL) nnROIsList[oROI] = nnROILString;
+		if (nnROIL){
+			while(endsWith(nnROILString,"|")) nnROILString = substring(nnROILString,0,lastIndexOf(nnROILString,"|"));
+			setResult("NN_ROIs\(by_centroid\)",oROI,nnROILString);
+			nnROIsList[oROI] = nnROILString;
+		}
+		if (nnROIDL){
+			while(endsWith(nnROIDLString,"|")) nnROIDLString = substring(nnROIDLString,0,lastIndexOf(nnROIDLString,"|"));
+			setResult("NN_ROI Dist\(by_centroid\)",oROI,nnROIDLString);
+			nnROIDsList[oROI] = nnROIDLString;
+		} 
 		/* Create or reset distance arrays for other objects */
-		minDSqs = newArray(0);
-		minDROI = newArray(0);
-		minXs = newArray(0);
-		minYs = newArray(0);
-		minXOs = newArray(0);
-		minYOs = newArray(0);
+		minDSqs = newArray();
+		minDROI = newArray();
+		minXs = newArray();
+		minYs = newArray();
+		minXOs = newArray();
+		minYOs = newArray();
 		/* For each ROI outline point find the min dist etc. to every inLine coordinate of the other ROIs */
 		for (dROI=0; dROI<maxNNROIs; dROI++){
+			cCDSq = oCDSqs[dROI]/lcfSq;
 			/* Find nearest in-line coordinates for every destination ROI */
-			minDSqs[dROI] = dimProd; /* this should be greater than the largest distSq */
-			for (rPx=0; rPx<rPxls; rPx++){ /* for all originating ROI outline pix */
-				x1 = outlinePxXs[rPx];
-				y1 = outlinePxYs[rPx];
-				for (dROIpx=0; dROIpx<oPxlsF; dROIpx++){  /* for all inLine perimeter pixels */
-					if(allInlinePxROIsF[dROIpx]==nnROIs[dROI]) { /* skip all except destination ROI */
-						x2 = allInlinePxXsF[dROIpx];
-						y2 = allInlinePxYsF[dROIpx];
-						distSq = pow(x1-x2,2) + pow(y1-y2,2); /* note this this the sqrt is not applied until the result is determined for the table */
-						if (distSq < minDSqs[dROI]){
-							minDSqs[dROI] = distSq;
-							minXs[dROI] = x2;
-							minYs[dROI] = y2;
-							minXOs[dROI] = x1;
-							minYOs[dROI] = y1;
-							minDROI[dROI] = nnROIs[dROI];
-							iMinDROIpx = dROIpx;
-							iMinRPx = rPx;
-						}
-					}
-					dROIpx+=destPixSkip;
-				}
-				rPx+=outlinePixSkip;
-			}
-			/* now sub-sample of pixels were skipped */
-			if (outlinePixSkip>0 || destPixSkip>0){
-				rangeOutlinePxXs = Array.concat(outlinePxXs,outlinePxXs,outlinePxXs);
-				rangeOutlinePxYs = Array.concat(outlinePxYs,outlinePxYs,outlinePxYs);
-				rangeAllInlinePxXsF = Array.concat(allInlinePxXsF,allInlinePxXsF,allInlinePxXsF);
-				rangeAllInlinePxYsF = Array.concat(allInlinePxYsF,allInlinePxYsF,allInlinePxYsF);
-				rangeAllInlinePxROIsF = Array.concat(allInlinePxROIsF,allInlinePxROIsF,allInlinePxROIsF);
-				rPxOverRange = maxOf(outlinePixSkip,floor(rPxls*resampleF));
-				dPxOverRange = maxOf(destPixSkip,floor(oPxls*resampleF));
-				startRPX = rPxls + iMinRPx - rPxOverRange;
-				endRPX = rPxls + iMinRPx + rPxOverRange;
-				startDROIPx = oPxlsF + iMinDROIpx - dPxOverRange;
-				endDROIPx = oPxlsF + iMinDROIpx + dPxOverRange;
-				for (rPx=startRPX; rPx<endRPX; rPx++){ /* resample at full resolution in the vicinity of the closest pixels  */
-					x1 = rangeOutlinePxXs[rPx];
-					y1 = rangeOutlinePxYs[rPx];
-					for (dROIpx=startDROIPx; dROIpx<endDROIPx; dROIpx++){  /* resample at full resolution in the vicinity of the closest destination pixels */
-						if(rangeAllInlinePxROIsF[dROIpx]==nnROIs[dROI]) { /* skip all except destination ROI */
-							x2 = rangeAllInlinePxXsF[dROIpx];
-							y2 = rangeAllInlinePxYsF[dROIpx];
+			minDSq = cCDSq; /* this should be greater than the ctr-ctr distance squared  - oCDSqs are scaled units */
+			minSearchIncomplete = true;
+			nnDROI = nnROIs[dROI];
+			dROIbkp = dROI;
+			coordN = 0;
+			minX = dimSum;
+			minY = dimSum;
+			minXO = dimSum;
+			minYO = dimSum;
+			while(minX>=dimSum-1){
+				for (rPx=0; rPx<rPxls; rPx++){ /* for all originating ROI outline pix */
+					x1 = outlinePxXs[rPx];
+					y1 = outlinePxYs[rPx];
+					for (dROIpx=0; dROIpx<allInlinePxROIsF.length; dROIpx++){  /* for all inLine perimeter pixels */
+						if(allInlinePxROIsF[dROIpx]==nnDROI) { /* skip all except destination ROI */
+							coordN++;
+							x2 = allInlinePxXsF[dROIpx];
+							y2 = allInlinePxYsF[dROIpx];
 							distSq = pow(x1-x2,2) + pow(y1-y2,2); /* note this this the sqrt is not applied until the result is determined for the table */
-							if (distSq < minDSqs[dROI]){
-								minDSqs[dROI] = distSq;
-								minXs[dROI] = x2;
-								minYs[dROI] = y2;
-								minXOs[dROI] = x1;
-								minYOs[dROI] = y1;
-								minDROI[dROI] = nnROIs[dROI];
-								iMinDROIpx = dROIpx-oPxlsF;
-								iMinRPx = rPx-rPxls;
-								nResamplingSuccess ++;
+							if (distSq < minDSq){
+								minDSq = distSq;
+								minX = x2;
+								minY = y2;
+								minXO = x1;
+								minYO = y1;
+							}
+						}
+						if(minDSq!=cCDSq && minX<dimSum) dROIpx += destPixSkip;
+					}
+					if(minDSq!=cCDSq && minX<dimSum) rPx += outlinePixSkip;
+				}
+				dimSum++;
+			}
+			if(minX==dimSum) IJ.log("Failure to find an adjacent ROI separation for oROI " + oROI + ", dROI " + dROI + ",\nprobably an image thresholding or ROI mismatch issue");
+			if (outlinePixSkip>0 || destPixSkip>0){
+				dMinXMin = maxOf(0,minX-resamplePx);
+				dMinXMax = minOf(dROIpx,minX+resamplePx);
+				dMinYMin = maxOf(0,minY-resamplePx);
+				dMinYMax = minOf(dROIpx,minY+resamplePx);
+				oMinXMin = maxOf(xMin,minXO-resamplePx);
+				oMinXMax = minOf(xMax,minXO+resamplePx);
+				oMinYMin = maxOf(yMin,minYO-resamplePx);
+				oMinYMax = minOf(yMax,minYO+resamplePx);
+				for (rPx=0; rPx<rPxls; rPx++){ /* for all originating ROI outline pix */
+					x1 = outlinePxXs[rPx];
+					y1 = outlinePxYs[rPx];
+					if (x1>=oMinXMin && x1<=oMinXMax && y1>=oMinYMin && y1<=oMinYMax){
+						for (dROIpx=0; dROIpx<oPxlsF; dROIpx++){  /* for all inLine perimeter pixels */
+							if(allInlinePxROIsF[dROIpx]==nnROIs[dROI]) { /* skip all except destination ROI */
+								x2 = allInlinePxXsF[dROIpx];
+								y2 = allInlinePxYsF[dROIpx];
+								if (x2>=dMinXMin && x2<=dMinXMax && y2>=dMinYMin && y2<=dMinYMax){
+									distSq = pow(x1-x2,2) + pow(y1-y2,2); /* note this this the sqrt is not applied until the result is determined for the table */
+									if (distSq < minDSq){
+										minDSq = distSq;
+										minX = x2;
+										minY = y2;
+										minXO = x1;
+										minYO = y1;
+										nResamplingSuccess++;
+									}
+								}
 							}
 						}
 					}
 				}
 			}
+			minDSqs[dROI] = minDSq;
+			minDROI[dROI] = nnROIs[dROI];
+			minXs[dROI] = minX;
+			minYs[dROI] = minY;
+			minXOs[dROI] = minXO;
+			minYOs[dROI] = minYO;
 		}
-		distIDRank = Array.rankPositions(minDSqs);
+		Array.sort(minDSqs,minDROI,minXs,minYs,minXOs,minYOs);
+		selectWindow(t);
 		for (n=0; n<maxTableObjects; n++){
-			distROI = distIDRank[n];
-			setResult("MinSepROI"+(n+1), oROI, minDROI[distROI]);
-			minSep = sqrt(minDSqs[distROI]);
-			setResult("MinSepROI"+(n+1)+"\(px\)", oROI, minSep);
-			totalMinDist += minSep;
-			if (lcf!=1) setResult("MinSepROI"+(n+1)+"\("+unit+"\)", oROI, lcf*minSep);
-			setResult("MinSepThisROIx"+(n+1), oROI, minXOs[distROI]);
-			setResult("MinSepThisROIy"+(n+1), oROI, minYOs[distROI]);
-			setResult("MinSepNNROIx"+(n+1), oROI, minXs[distROI]);
-			setResult("MinSepNNROIy"+(n+1), oROI, minYs[distROI]);
+			setResult("MinSepROI"+(n+1), oROI, minDROI[n]);
+			minSepPx = sqrt(minDSqs[n]);
+			setResult("MinSepROI"+(n+1)+"\(px\)", oROI, minSepPx);
+			totalMinDistPx += minSepPx;
+			if (lcf!=1) setResult("MinSepROI"+(n+1)+"\("+unit+"\)", oROI, lcf*minSepPx);
+			setResult("MinSepThisROIx"+(n+1), oROI, minXOs[n]);
+			setResult("MinSepThisROIy"+(n+1), oROI, minYOs[n]);
+			setResult("MinSepNNROIx"+(n+1), oROI, minXs[n]);
+			setResult("MinSepNNROIy"+(n+1), oROI, minYs[n]);
 			if (drawConnector){
 				if(n<maxLines){
 					setLineWidth(lineThickness[n]);
 					setColorFromColorName(lineColors[n]);
-					Overlay.drawLine(minXOs[distROI], minYOs[distROI], minXs[distROI], minYs[distROI]);
+					Overlay.drawLine(minXOs[n], minYOs[n], minXs[n], minYs[n]);
 					Overlay.show;
 				}
 			}
 		}
-		flushCount += 1;
+		flushCount++;
 		if (flushCount==fCycles) {
 			updateResults();
 			mC = parseInt(IJ.currentMemory());
@@ -407,11 +553,27 @@
 			mCP = mC*(100/mX);
 			if(mDiagnostics && mCP>50) IJ.log("Memory before flush: " + IJ.freeMemory);
 			if (mCP>90) {
-				keepGoing = getBoolean(mCP + "% of IJ memory has been used, do you want to continue", "Yes", "No");
-				if (!keepGoing) restoreExit("ImageJ may need restart to free memory. Then try fewer ROIs");
+				Dialog.create(mCP + "% of IJ memory has been used, analyzing object " + oROI + " out of " + nROIs);
+				highMemOptions = newArray("Keep going until the script inevitably crashes?","Exit but save current Results and ROI list for restart","Just exit macro");
+				Dialog.addRadioButtonGroup("What would you like to do now?",highMemOptions,3,1,highMemOptions[1]);
+				Dialog.addDirectory("Folder for saving work in progress:",defImagePath);
+				Dialog.addFile("Results filename:",fileNameNE+"_Results_" + dateCode + ".csv");
+				Dialog.addFile("ROI filename:",fileNameNE+"_ROIs_" + dateCode + ".zip");
+				Dialog.show;
+				leaveChoice = Dialog.getRadioButton();
+				if (!startsWith(leaveChoice,"Keep")){
+					if (startsWith(leaveChoice,"Exit but")){
+						saveDir = Dialog.getString();
+						resultsPath = saveDir + Dialog.getString();
+						roiPath = saveDir + Dialog.getString();
+						if (verifiedGetSet("set",prefsNameKey+"LastRunResults",true,resultsPath)=="") IJ.log("Failed to save\n" + resultsPath);
+						if (verifiedGetSet("set",prefsNameKey+"LastRunROIs",true,roiPath)=="") IJ.log("Failed to save\n" + roiPath);
+					}
+					restoreExit("Goodbye, to free up memory you will need to close ImageJ/Fiji and restart");
+				}
 			}
 			else if (mCP>50){
-				if(mDiagnostics) IL.log("mC = " + mC + ", mX = " + mX + ", mCP = " + mCP);
+				if(mDiagnostics) IJ.log("mC = " + mC + ", mX = " + mX + ", mCP = " + mCP);
 				memFlush(200); /* Applies 3 memory clearing commands from a function with "fWait"" wait times */
 				if(mDiagnostics){
 					IJ.log("Memory after flush: " + IJ.freeMemory);
@@ -422,12 +584,11 @@
 			flushCount = 0;
 		}
 	}
-	if(nnROIL) Table.setColumn("NN_ROIs\(by_centroid\)",nnROIsList);
-	if (outlinePixSkip>0 || destPixSkip>0) IJ.log("Resampling found " +nResamplingSuccess+ " closer distances");
+	if (outlinePixSkip>0 || destPixSkip>0) IJ.log("Resampling of " + plusminus+resamplePx + " pixels: " +nResamplingSuccess+ " closer distances");
 	updateResults();
 	if (animStack){
 		if(mDiagnostics) {
-			preAnimSecs = (getTime()-start)/1000;
+			preAnimSecs = (getTime()-startTime)/1000;
 			preAnimMins = floor(preAnimSecs/60);
 			IJ.log("Run time = " + preAnimMins + " mins " + preAnimSecs-60*preAnimMins + " s");
 		}
@@ -541,17 +702,56 @@
 	}
 	Overlay.show;
 	setBatchMode("exit & display"); /* exit batch mode */
-	restoreSettings();
 	run("Select None");
-	fullSecs = (getTime()-start)/1000;
+	fullSecs = (getTime()-startTime)/1000;
 	fullMins = floor(fullSecs/60);
-	IJ.log("Run time = " + fullMins + " mins " + fullSecs-60*fullMins + " s");
-	IJ.log("Total of minimum distances recorded = " + totalMinDist + " " + unit);
-	showStatus("!Separation Macro Finished: " + roiManager("count") + " objects analyzed in " + (getTime()-start)/1000 + "s.");
+	summaryTxt = "Separation Macro Finished: " + nROIs + " objects analyzed in " + (getTime()-startTime)/1000 + "s.";
+	showStatus(summaryTxt);
+	summaryTxt += "\nRun time = " + fullMins + " mins " + fullSecs-60*fullMins + " s";
+	summaryTxt += "\nTotal of minimum distances recorded = " + lcf*totalMinDistPx + " " + unit;
+	IJ.log(summaryTxt);
 	beep(); wait(300); beep(); wait(300); beep();
+	Dialog.create("Save options \(" + macroL + "\)");
+		Dialog.addDirectory("Folder for saving work in progress:",defImagePath);
+		Dialog.addCheckbox("Save image using filename below",true);
+		Dialog.addFile("Image filename:",fileNameNE+"_NNSep.tif");
+		Dialog.addCheckbox("Save Results using path below",true);
+		Dialog.addFile("Results filename:",fileNameNE+"_Results_" + dateCode + ".csv");
+		Dialog.addCheckbox("Save ROI set using path below",true);
+		Dialog.addFile("ROI filename:",fileNameNE+"_ROIs_" + dateCode + ".zip");
+	Dialog.show;
+		saveDir = Dialog.getString();
+		saveImage = Dialog.getCheckbox();
+		imagePath = saveDir + Dialog.getString();
+		saveResults = Dialog.getCheckbox();
+		resultsPath = saveDir + Dialog.getString();
+		saveROI = Dialog.getCheckbox();
+		roiPath = saveDir + Dialog.getString();
+	selectWindow(t);
+	if (saveImage){
+		getSet = verifiedGetSet("set",prefsNameKey+"LastRunImage",true,imagePath);
+		if (getSet=="") IJ.log("Failed to save\n" + imagePath);
+	}
+	if (saveResults){
+		getSet = verifiedGetSet("set",prefsNameKey+"LastRunResults",true,resultsPath);
+		if (getSet=="") IJ.log("Failed to save\n" + resultsPath);
+	}
+	if(saveROI){
+		getSet = verifiedGetSet("set",prefsNameKey+"lastRunROIs",true,roiPath);
+		if (getSet=="") IJ.log("Failed to save\n" + roiPath);
+	}
+	if (roiManager("count")<=0) && tempROIpath!=""){
+		getSet = verifiedGetSet("get",prefsNameKey+"tempROIs",true,"");
+		if (getSet=="") IJ.log("Failed to restore\n" + tempROIpath);
+		else getSet = verifiedGetSet("set",prefsNameKey+"lastRunROIs",true,roiPath);
+		if (getSet=="") IJ.log("Failed to save\n" + roiPath);
+	}
 	memFlush(300); /* Applies 3 memory clearing commands from a function with 300 ms wait times */
-	if(mDiagnostics) IJ.log("Final memory: " + IJ.freeMemory);
-	IJ.log("-----\n");
+	if(mDiagnostics) IJ.log("Final memory: " + IJ.freeMemory + "\n-----\n");
+	restoreSettings();
+	/*
+		End of Add_NN_ROI_Min-Separation_to_Results macro
+	*/
 	/*
 		( 8(|)	( 8(|)	ASC Functions	@@@@@:-)	@@@@@:-)
 	*/
@@ -584,48 +784,6 @@
 		else edgeObjects = false;
 		return edgeObjects;
 	}
-	function checkForPlugin(pluginName) {
-		/* v161102 changed to true-false
-			v180831 some cleanup
-			v210429 Expandable array version
-			v220510 Looks for both class and jar if no extension is given
-			v220818 Mystery issue fixed, no longer requires restoreExit	*/
-		pluginCheck = false;
-		if (getDirectory("plugins") == "") print("Failure to find any plugins!");
-		else {
-			pluginDir = getDirectory("plugins");
-			if (lastIndexOf(pluginName,".")==pluginName.length-1) pluginName = substring(pluginName,0,pluginName.length-1);
-			pExts = newArray(".jar",".class");
-			knownExt = false;
-			for (j=0; j<lengthOf(pExts); j++) if(endsWith(pluginName,pExts[j])) knownExt = true;
-			pluginNameO = pluginName;
-			for (j=0; j<lengthOf(pExts) && !pluginCheck; j++){
-				if (!knownExt) pluginName = pluginName + pExts[j];
-				if (File.exists(pluginDir + pluginName)) {
-					pluginCheck = true;
-					showStatus(pluginName + "found in: "  + pluginDir);
-				}
-				else {
-					pluginList = getFileList(pluginDir);
-					subFolderList = newArray;
-					for (i=0,subFolderCount=0; i<lengthOf(pluginList); i++) {
-						if (endsWith(pluginList[i], "/")) {
-							subFolderList[subFolderCount] = pluginList[i];
-							subFolderCount++;
-						}
-					}
-					for (i=0; i<lengthOf(subFolderList); i++) {
-						if (File.exists(pluginDir + subFolderList[i] +  "\\" + pluginName)) {
-							pluginCheck = true;
-							showStatus(pluginName + " found in: " + pluginDir + subFolderList[i]);
-							i = lengthOf(subFolderList);
-						}
-					}
-				}
-			}
-		}
-		return pluginCheck;
-	}
 	function checkForRoiManager() {
 		/* v161109 adds the return of the updated ROI count and also adds dialog if there are already entries just in case . .
 			v180104 only asks about ROIs if there is a mismatch with the results
@@ -635,8 +793,10 @@
 			NOTE: Requires ASC restoreExit function, which assumes that saveSettings has been run at the beginning of the macro
 			v220706: Table friendly version
 			v220816: Enforces non-inverted LUT as well as white background and fixes ROI-less analyze.  Adds more dialog labeling.
+			v230126: Does not change foreground or background colors.
+			v230130: Cosmetic improvements to dialog.
 			*/
-		functionL = "checkForRoiManager_v220816";
+		functionL = "checkForRoiManager_v230126";
 		nROIs = roiManager("count");
 		nRes = nResults;
 		tSize = Table.size;
@@ -650,7 +810,7 @@
 		}
 		if(nROIs==0 || nROIs!=nRes){
 			Dialog.create("ROI mismatch options: " + functionL);
-				Dialog.addMessage("This macro requires that all objects have been loaded into the ROI manager.\n \nThere are   " + nRes +"   results.\nThere are   " + nROIs +"   ROIs.\nDo you want to:");
+				Dialog.addMessage("This macro requires that all objects have been loaded into the ROI manager.\n \nThere are   " + nRes +"   results.\nThere are   " + nROIs + "   ROIs",12,"#782F40");
 				mismatchOptions = newArray();
 				if(nROIs==0) mismatchOptions = Array.concat(mismatchOptions,"Import a saved ROI list");
 				else mismatchOptions = Array.concat(mismatchOptions,"Replace the current ROI list with a saved ROI list");
@@ -659,7 +819,7 @@
 				mismatchOptions = Array.concat(mismatchOptions,"Clear ROI list and Results Table and reanalyze \(overrides above selections\)");
 				if (!is("binary")) Dialog.addMessage("The active image is not binary, so it may require thresholding before analysis");
 				mismatchOptions = Array.concat(mismatchOptions,"Get me out of here, I am having second thoughts . . .");
-				Dialog.addRadioButtonGroup("ROI mismatch; what would you like to do:_____", mismatchOptions, lengthOf(mismatchOptions), 1, mismatchOptions[0]);
+				Dialog.addRadioButtonGroup("How would you like to proceed:_____", mismatchOptions, lengthOf(mismatchOptions), 1, mismatchOptions[0]);
 			Dialog.show();
 				mOption = Dialog.getRadioButton();
 				if (startsWith(mOption,"Sorry")) restoreExit("Sorry this did not work out for you.");
@@ -680,8 +840,9 @@
 						getThreshold(t1,t2);
 						if (t1==-1)  {
 							run("Auto Threshold", "method=Default");
-							setOption("BlackBackground", false);
-							run("Make Binary");
+							run("Convert to Mask");
+							if (is("Inverting LUT")) run("Invert LUT");
+							if(getPixel(0,0)==0) run("Invert");
 						}
 					}
 				}
@@ -694,7 +855,6 @@
 					i.e. the corner 4 pixels should now be all black, if not, we have a "border issue". */
 				if (cornerMean==0) run("Invert");
 				if (isOpen("ROI Manager"))	roiManager("reset");
-				setOption("BlackBackground", false);
 				if (isOpen("Results")) {
 					selectWindow("Results");
 					run("Close");
@@ -760,41 +920,98 @@
 		}
 		if (isOpen(oIID)) selectImage(oIID);
 	}
-	function createROIBinaryImage(originalImage,labelName) {
-		/* A binary copy of the current image with just the ROIs black against a white background
-			*/
-		ROIn = roiManager("count");
-		if (ROIn==0) restoreExit("Sorry, the createROIBinaryImage function requires ROIs");
-		selectWindow(originalImage);
-		newImage(labelName, "8-bit black", getWidth(),getHeight(), 1);
-		run("Convert to Mask");
-		if(is("Inverting LUT")) run("Invert LUT");
-		if(getPixel(0, 0)!=255) run("Invert");/* Want white BG with increasing intensity in objects */
-		for (i=0 ; i<ROIn; i++) {
-			roiManager("select", i);
-			run("Invert");
+	function createRandomIndexArray(arraylength){
+		/* Based in https://imagej.nih.gov/ij/macros/examples/RandomizeArray.txt */
+		randomArray = Array.getSequence(arraylength);
+		n = randomArray.length;
+		while (n > 1) {
+		  k = n * random();     // 0 <= k < n.
+		  n--;                  // n is now the last pertinent index;
+		  temp = randomArray[n];  // swap array[n] with array[k] (does nothing if k==n).
+		  randomArray[n] = randomArray[k];
+		  randomArray[k] = temp;
 		}
-		run("Select None");
+		return randomArray;
 	}
-	function createROILabeledImage(originalImage,labelName) {
-		/* 1st version variant that uses white image so label can start at zero
-		v220708 creates new image instead of duplicating old
-			*/
-		labels = roiManager("count"); /* ONLY this method of ROI counting returns "0" when there is no manager open */
-		if (labels==0) restoreExit("Sorry, this macro labels using ROI Manager objects, try the Gabriel Landini plugin instead.");
-		selectWindow(originalImage);
-		newImage(labelName, "8-bit white", getWidth(),getHeight(), 1);
-		run("Convert to Mask");
-		if(is("Inverting LUT")) run("Invert LUT");
-		if(getPixel(0, 0)!=0) run("Invert");/* Want black BG with increasing intensity in objects */
-		if (labels>65536) run("32-bit"); /* hopefully no more than 4294967295! */
-		else if (labels>=255) run("16-bit");
-		for (i=0 ; i<labels; i++) {
+	function createROIImage(newTitle,imageWidth,imageHeight,blackBackground,labelObjects,expandN,hollow) { /* blackBackground and labelObjects options are true-false */
+		/* Creates a binary or ROI labeled image
+			Requires restoreExit function
+			v230130 1st "universal" version with label option and background options */
+		batchMode = is("Batch Mode"); /* Store batch status mode before toggling */
+		if (!batchMode) setBatchMode(true); /* Toggle batch mode on if previously off */
+		labels = roiManager("count");
+		if (labels==0) restoreExit("Sorry, this macro labels using ROI Manager objects, try the Landini plugin instead.");
+		if (blackBackground) bG = "black";
+		else bG = "white";
+		maxInt = 65535;
+		if (labelObjects){
+			if (labels>65534) restoreExit("The labeling function is limited to 65536 objects");
+			else if (labels<=253){
+				newImage(newTitle, "8-bit " + bG, imageWidth, imageHeight, 1);
+				maxInt = 255;
+			}
+			else newImage(newTitle, "16-bit " + bG, imageWidth,imageHeight, 1);
+			statusMessage = "Creating 1 to " + labels + " intensity labeled inlines image";
+		}
+		else{
+			newImage(newTitle, "8-bit " + bG, imageWidth, imageHeight, 1);
+			maxInt = 255;
+		}
+		if (hollow && expandN==0) expandN = -1; /* I think you would expect hollow to still work even if without defined thickness */
+		statusMessage = "Creating " + newTitle + " with " + labels;
+		if (hollow) statusMessage += " hollow \(" + expandN + " pixels thick\)";
+		statusMessage += " objects";
+		if(labelObjects) statusMessage += " with ROI labels";
+		if(blackBackground) statusMessage += ", on black background";
+		else statusMessage += ", on white background";
+		showStatus(statusMessage);
+		for (i=0,labelValue=1; i<labels; i++,labelValue++) {
+			showProgress(i, labels);
 			roiManager("select", i);
-			run("Add...", "value=[i]");
-			if (nResults==labels) setResult("Label\(Int\)", i, i);
+			if (expandN<=0){
+				if (labelObjects) run("Set...", "value=[labelValue]");
+				else if (blackBackground) run("Set...", "value=[maxInt]");
+				else run("Set...", "value=0");
+				if (hollow){
+					expandN = minOf(expandN,-1);
+					run("Enlarge...", "enlarge=[expandN] pixel");
+					if (blackBackground) run("Set...", "value=0");
+					else run("Set...", "value=[maxInt]");
+				}
+			}
+			else {
+				if (expandN<0){
+					run("Enlarge...", "enlarge=[expandN] pixel"); /* i.e. outer outLines */
+					if (labelObjects) run("Set...", "value=[labelValue]");
+					else if (blackBackground) run("Set...", "value=[maxInt]");
+					else run("Set...", "value=0");
+				}
+				if (hollow){  /* I think you would expect hollow to still work even if without defined thickness */
+					roiManager("select", i);
+					if (blackBackground) run("Set...", "value=0");
+					else run("Set...", "value=[maxInt]");
+				}
+			}
 		}
 		run("Select None");
+		if (!labelObjects){
+			run("Convert to Mask");
+			if(is("Inverting LUT")) run("Invert LUT");
+			if (blackBackground && getPixel(0, 0)!=0) run("Invert");/* For white BG Binary*/
+			else if(!blackBackground && getPixel(0, 0)!=255) run("Invert");/* For black BG binary */
+		}
+		if(is("Inverting LUT")) run("Invert LUT");
+		if (!batchMode) setBatchMode("exit and display");
+	}
+	function getDateCode() {
+		/* v170823 */
+		getDateAndTime(year, month, dayOfWeek, dayOfMonth, hour, minute, second, msec);
+		month = month + 1; /* Month starts at zero, presumably to be used in array */
+		if(month<10) monthStr = "0" + month;
+		else monthStr = ""  + month;
+		if (dayOfMonth<10) dayOfMonth = "0" + dayOfMonth;
+		dateCodeUS = monthStr+dayOfMonth+substring(year,2);
+		return dateCodeUS;
 	}
   	function getFontChoiceList() {
 		/*	v180723 first version
@@ -836,6 +1053,16 @@
 		}
 		else return "";
 	}
+	function getTimeLeftTxt(startTime,startN,currentN,finishN){
+		/* v230127: 1st version */
+		secsToComplete = round((finishN-currentN) * (getTime()-startTime)/(1000 * (currentN-startN)));
+		minsToComplete = floor(secsToComplete/60);
+		secsToComplete -= minsToComplete*60;
+		timeLeftTxt = "";
+		if (minsToComplete>0) timeLeftTxt += "" + minsToComplete + " mins";
+		if (secsToComplete>0) timeLeftTxt += " " + secsToComplete + " secs";
+		return timeLeftTxt;
+	}
 	function indexOfArray(array,string,default) {
 		/* v190423 Adds "default" parameter (use -1 for backwards compatibility). Returns only first found value */
 		index = default;
@@ -855,40 +1082,23 @@
 		call("java.lang.System.gc"); /* force a garbage collection */
 		wait(waitTime);
 	}
-	function removeEdgeObjects(){
+	function removeBlackEdgeObjects(){
 	/*	Remove black edge objects without using Analyze Particles
 	Peter J. Lee  National High Magnetic Field Laboratory
-	Requires:
-		The versatile wand tool: https://imagej.nih.gov/ij/plugins/versatile-wand-tool/index.html by Michael Schmid as built in wand does not select edge objects
-		checkForEdgeObjects function
-	Optional: morphology_collection.jar
 	1st version v190604
-	v190605 This version uses Gabriel Landini's morphology plugin if available
-	v190725 Checks for edges first and then returns "true" if edge objects removed
 	v200102 Removed unnecessary print command.
+	v230106 Does not require any plugins or other functions. Uses built-in macro functions for working with colors available in ImageJ 1.53h and later
 	*/
-		if (checkForEdgeObjects()) { /* requires checkForEdgeObjectsFunction */
-			if (checkForPlugin("morphology_collection.jar")) run("BinaryKillBorders ", "top right bottom left");
-			else {
-				if (!checkForPlugin("Versatile_Wand_Tool.java") && !checkForPlugin("versatile_wand_tool.jar") && !checkForPlugin("Versatile_Wand_Tool.jar")) restoreExit("Versatile wand tool required");
-				run("Select None");
-				originalBGCol = getValue("color.background");
-				cWidth = getWidth()+2; cHeight = getHeight()+2;
-				run("Canvas Size...", "width=&cWidth height=&cHeight position=Center");
-				setColor("black");
-				drawRect(0, 0, cWidth, cHeight);
-				call("Versatile_Wand_Tool.doWand", 0, 0, 0.0, 0.0, 0.0, "8-connected");
-				run("Colors...", "background=white");
-				run("Clear", "slice");
-				setBackgroundColor(originalBGCol); /* Return background to original color */
-				makeRectangle(1, 1, cWidth-2, cHeight-2);
-				run("Crop");
-			}
-			showStatus("Remove_Edge_Objects function complete");
-			removeObjects = true;
-		}
-		else removeObjects = false;
-		return removeObjects;
+		requires("1.53h");	
+		originalFGCol = Color.foreground;
+		cWidth = getWidth()+2; cHeight = getHeight()+2;
+		run("Canvas Size...", "width=&cWidth height=&cHeight position=Center zero");
+		Color.setForeground("white");
+		floodFill(0, 0);
+		Color.setForeground(originalFGCol);
+		makeRectangle(1, 1, cWidth-2, cHeight-2);
+		run("Crop");
+		showStatus("Remove_Edge_Objects function complete");
 	}
 	function restoreExit(message){ /* Make a clean exit from a macro, restoring previous settings */
 		/* v200305 1st version using memFlush function */
@@ -917,12 +1127,94 @@
 			selectWindow(Dialog.getChoice());
 		}
   	}
+	function verifiedGetSet(setOrGet,key,openOrSave,optPath){
+		/* (setOrGet,key,altPath) setOrGet should be "set" or "get",
+		key is the full prefs key (the key should end in "Image", "Results", or "ROIs")
+		openOrSave is true/false if false the function just returns the prefs key
+		optPath is the alternative path for the call (could be just "" for get, needs to be the save path for set)
+		v230131: 1st version    Peter J. Lee  Applied Superconductivity Center NHMFL FS
+		*/
+		setOrGet = toLowerCase(setOrGet);
+		openImageN = nImages;
+		success = false;
+		if (setOrGet!="set" && setOrGet!="get") exit("Expecting 'set' or 'get', not " + setOrGet);
+		else if (!endsWith(key,"ROIs") && !endsWith(key,"Results") && !endsWith(key,"Image")) exit("Expecting suffix of 'ROIs' or 'Results' or 'Image' not " + key);
+		else if (setOrGet=="get"){
+			restorePath = call("ij.Prefs.get", key, optPath);
+			if (File.exists(restorePath)){
+				if (File.length(restorePath)>0){
+					if (!openOrSave) return restorePath;
+					else if(endsWith(key,"ROIs")){
+						nROIs = roiManager("count");
+						if (nROIs>0){
+							roiManager("reset");
+							IJ.log("Previous " + nROIs + " ROIs replaced from: " + restorePath);
+						}
+						else IJ.log("ROIs restored from:\n" + restorePath);
+						roiManager("open", restorePath);
+						if (roiManager("count")>0)){
+							call("ij.Prefs.set", key, restorePath);
+							success = true;
+						}
+					}
+					else if(endsWith(key,"Image")){
+						open(restorePath);
+						if(nImages>openImageN){
+							IJ.log("Image restored from: " + restorePath);
+							success = true;
+						}
+					}
+					else if(endsWith(key,"Results")){
+						File.open(restorePath);
+						if(nResults>0){
+							IJ.log("Results restored from: " + restorePath);
+							success = true;
+						}
+					}
+				}
+			}
+			if (success) return restorePath;
+			else return "";				
+		}
+		/* should be 'set' from now on */
+		else {
+			saveSuccess = false;
+			if(endsWith(key,"ROIs")){
+				if(roiManager("count")>0){
+					if (openOrSave) roiManager("save", optPath);
+					if (File.exists(optPath)){
+						if (File.length(optPath)>0) success = true;
+					}
+				}
+			}
+			else if(endsWith(key,"Results")){
+				if(nResults>0){
+					if (openOrSave) saveAs("Results", optPath);
+					if (File.exists(optPath){
+						if (File.length(optPath)>0) success = true;
+					}
+				}
+			}
+			else if (nImages>0){
+				if (openOrSave) save(optPath);
+				if (File.exists(optPath)){
+					if (File.length(optPath)>0)	success = true;
+				}
+			}
+			if (success) return optPath;
+			else return "";
+		}
+		/* end of verifiedGetSet */
+	}
+		
+	/* modified BAR color functions */
+	
 	function getColorArrayFromColorName(colorName) {
 		/* v180828 added Fluorescent Colors
 		   v181017-8 added off-white and off-black for use in gif transparency and also added safe exit if no color match found
 		   v191211 added Cyan
 		   v211022 all names lower-case, all spaces to underscores v220225 Added more hash value comments as a reference v220706 restores missing magenta
-		   REQUIRES restoreExit function.  57 Colors
+		   REQUIRES restoreExit function.  57 Colors v230130 Added more descriptions and modified order
 		*/
 		if (colorName == "white") cA = newArray(255,255,255);
 		else if (colorName == "black") cA = newArray(0,0,0);
@@ -944,13 +1236,13 @@
 		else if (colorName == "pink") cA = newArray(255, 192, 203);
 		else if (colorName == "violet") cA = newArray(127,0,255);
 		else if (colorName == "orange") cA = newArray(255, 165, 0);
-		else if (colorName == "garnet") cA = newArray(120,47,64);
-		else if (colorName == "gold") cA = newArray(206,184,136);
+		else if (colorName == "garnet") cA = newArray(120,47,64); /* #782F40 */
+		else if (colorName == "gold") cA = newArray(206,184,136); /* #CEB888 */
 		else if (colorName == "aqua_modern") cA = newArray(75,172,198); /* #4bacc6 AKA "Viking" aqua */
 		else if (colorName == "blue_accent_modern") cA = newArray(79,129,189); /* #4f81bd */
 		else if (colorName == "blue_dark_modern") cA = newArray(31,73,125); /* #1F497D */
-		else if (colorName == "blue_modern") cA = newArray(58,93,174); /* #3a5dae */
 		else if (colorName == "blue_honolulu") cA = newArray(0,118,182); /* Honolulu Blue #30076B6 */
+		else if (colorName == "blue_modern") cA = newArray(58,93,174); /* #3a5dae */
 		else if (colorName == "gray_modern") cA = newArray(83,86,90); /* bright gray #53565A */
 		else if (colorName == "green_dark_modern") cA = newArray(121,133,65); /* Wasabi #798541 */
 		else if (colorName == "green_modern") cA = newArray(155,187,89); /* #9bbb59 AKA "Chelsea Cucumber" */
@@ -968,20 +1260,20 @@
 		/* Fluorescent Colors https://www.w3schools.com/colors/colors_crayola.asp */
 		else if (colorName == "radical_red") cA = newArray(255,53,94);			/* #FF355E */
 		else if (colorName == "wild_watermelon") cA = newArray(253,91,120);		/* #FD5B78 */
+		else if (colorName == "shocking_pink") cA = newArray(255,110,255);		/* #FF6EFF Ultra Pink */
+		else if (colorName == "razzle_dazzle_rose") cA = newArray(238,52,210); 	/* #EE34D2 */
+		else if (colorName == "hot_magenta") cA = newArray(255,0,204);			/* #FF00CC AKA Purple Pizzazz */
 		else if (colorName == "outrageous_orange") cA = newArray(255,96,55);	/* #FF6037 */
 		else if (colorName == "supernova_orange") cA = newArray(255,191,63);	/* FFBF3F Supernova Neon Orange*/
-		else if (colorName == "atomic_tangerine") cA = newArray(255,153,102);	/* #FF9966 */
-		else if (colorName == "neon_carrot") cA = newArray(255,153,51);			/* #FF9933 */
 		else if (colorName == "sunglow") cA = newArray(255,204,51); 			/* #FFCC33 */
+		else if (colorName == "neon_carrot") cA = newArray(255,153,51);			/* #FF9933 */
+		else if (colorName == "atomic_tangerine") cA = newArray(255,153,102);	/* #FF9966 */
 		else if (colorName == "laser_lemon") cA = newArray(255,255,102); 		/* #FFFF66 "Unmellow Yellow" */
 		else if (colorName == "electric_lime") cA = newArray(204,255,0); 		/* #CCFF00 */
 		else if (colorName == "screamin'_green") cA = newArray(102,255,102); 	/* #66FF66 */
 		else if (colorName == "magic_mint") cA = newArray(170,240,209); 		/* #AAF0D1 */
 		else if (colorName == "blizzard_blue") cA = newArray(80,191,230); 		/* #50BFE6 Malibu */
 		else if (colorName == "dodger_blue") cA = newArray(9,159,255);			/* #099FFF Dodger Neon Blue */
-		else if (colorName == "shocking_pink") cA = newArray(255,110,255);		/* #FF6EFF Ultra Pink */
-		else if (colorName == "razzle_dazzle_rose") cA = newArray(238,52,210); 	/* #EE34D2 */
-		else if (colorName == "hot_magenta") cA = newArray(255,0,204);			/* #FF00CC AKA Purple Pizzazz */
 		else restoreExit("No color match to " + colorName);
 		return cA;
 	}
