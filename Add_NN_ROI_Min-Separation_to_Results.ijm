@@ -20,9 +20,10 @@
 	v230105-6 Quick fix for sub-sampling issue on very large images with high object counts (not fully tested).
 	v230120 Fixed a typo that crashed macro on 1st memory flush! v230124: Minor syntax optimization.
 	v230121-9 Saves last run enabling easier restart. More robust resampling produced much faster analysis without reducing accuracy. Restored ASC default background (white) and foreground (black) throughout for consistency.
-	v230130-1: File save check changed from File.exists to File.length>0 as a more reliable indicator of a successful save.
+	v230130-1: File save check changed from File.exists to File.length>0 as a more reliable indicator of a successful save. f1 updated addImageToStack function
+	v230803: Replaced getDir for 1.54g10.  f1: v230804 version of getResultsTableList and selectResultsWindow functions. f2: v230811 fixed function verifiedGetSet.
 	*/
-	macroL = "Add_NN_ROI_Min-Separation_to_Results_v230131.ijm";
+	macroL = "Add_NN_ROI_Min-Separation_to_Results_v230803-f2.ijm";
 	setBatchMode(true);
 	requires("1.47r"); /* not sure of the actual latest working version but 1.45 definitely doesn't work */
 	saveSettings(); /* To restore settings at the end */
@@ -97,7 +98,7 @@
 	else{
 		t = getTitle();
 		fileNameNE = File.getNameWithoutExtension(t);
-		defImagePath = getDir("image");
+		defImagePath = getDirectory("image");
 		null = verifiedGetSet("set",prefsNameKey+"LastRunImage",false,"");
 	} 
 	if (checkForEdgeObjects() && roiManager("count")!=0){
@@ -119,7 +120,7 @@
 	lcf = (pixelWidth+pixelHeight)/2; /* ---> add here the side size of 1 pixel in the new calibrated units (e.g. lcf=5, if 1 pixels is 5mm) <--- */
 	lcfSq = pow(lcf,2);
 	/* create the dialog prompt */
-	selectResultsWindow(); /* allows you to choose from multiple windows */
+	selectResultsWindow(true); /* allows you to choose from multiple windows */
 	if(!isNaN(Table.get("Perim.",0))) Array.getStatistics(Table.getColumn("Perim."), minPerim, maxPerim, meanPerim, null) ;
 	else exit("Sorry, Perim values in table are needed for this macro");
 	reRun = false;
@@ -756,19 +757,22 @@
 		( 8(|)	( 8(|)	ASC Functions	@@@@@:-)	@@@@@:-)
 	*/
 	function addImageToStack(stackName,baseImage) {
+		/* v230614: Added "Select None" */
 		run("Copy");
 		selectWindow(stackName);
 		run("Add Slice");
 		run("Paste");
+		run("Select None");
 		selectWindow(baseImage);
 	}
 	function arrayToString(array,delimiter){
 		/* 1st version April 2019 PJL
 			v190722 Modified to handle zero length array
-			v201215 += stopped working so this shortcut has been replaced */
+			v220307 += restored for else line */
+		string = "";
 		for (i=0; i<array.length; i++){
-			if (i==0) string = "" + array[0];
-			else  string = string + delimiter + array[i];
+			if (i==0) string += array[0];
+			else  string += delimiter + array[i];
 		}
 		return string;
 	}
@@ -910,15 +914,18 @@
 		}
 	}
 	function closeImageByTitle(windowTitle) {  /* Cannot be used with tables */
-		/* v181002 reselects original image at end if open
-		   v200925 uses "while" instead of if so it can also remove duplicates
+		/* v181002: reselects original image at end if open
+		   v200925: uses "while" instead of if so it can also remove duplicates
+		   v230411:	checks to see if any images open first.
 		*/
-		oIID = getImageID();
-        while (isOpen(windowTitle)) {
-			selectWindow(windowTitle);
-			close();
+		if(nImages>0){
+			oIID = getImageID();
+			while (isOpen(windowTitle)) {
+				selectWindow(windowTitle);
+				close();
+			}
+			if (isOpen(oIID)) selectImage(oIID);
 		}
-		if (isOpen(oIID)) selectImage(oIID);
 	}
 	function createRandomIndexArray(arraylength){
 		/* Based in https://imagej.nih.gov/ij/macros/examples/RandomizeArray.txt */
@@ -1013,23 +1020,20 @@
 		dateCodeUS = monthStr+dayOfMonth+substring(year,2);
 		return dateCodeUS;
 	}
+	}
   	function getFontChoiceList() {
-		/*	v180723 first version
-			v180828 Changed order of favorites
-			v190108 Longer list of favorites
-		*/
+		/*	v180723 first version, v180828 Changed order of favorites, v190108 Longer list of favorites, v230209 Minor optimization	*/
 		systemFonts = getFontList();
 		IJFonts = newArray("SansSerif", "Serif", "Monospaced");
 		fontNameChoice = Array.concat(IJFonts,systemFonts);
 		faveFontList = newArray("Your favorite fonts here", "Open Sans ExtraBold", "Fira Sans ExtraBold", "Noto Sans Black", "Arial Black", "Montserrat Black", "Lato Black", "Roboto Black", "Merriweather Black", "Alegreya Black", "Tahoma Bold", "Calibri Bold", "Helvetica", "SansSerif", "Calibri", "Roboto", "Tahoma", "Times New Roman Bold", "Times Bold", "Serif");
 		faveFontListCheck = newArray(faveFontList.length);
-		counter = 0;
-		for (i=0; i<faveFontList.length; i++) {
+		for (i=0,counter=0; i<faveFontList.length; i++) {
 			for (j=0; j<fontNameChoice.length; j++) {
 				if (faveFontList[i] == fontNameChoice[j]) {
 					faveFontListCheck[counter] = faveFontList[i];
-					counter +=1;
 					j = fontNameChoice.length;
+					counter++;
 				}
 			}
 		}
@@ -1037,17 +1041,20 @@
 		fontNameChoice = Array.concat(faveFontListCheck,fontNameChoice);
 		return fontNameChoice;
 	}
-	function getResultsTableList() {
+	function getResultsTableList(ignoreHistograms) {
 		/* simply returns array of open results tables
 		v200723: 1st version
-		v201207: Removed warning message */
+		v201207: Removed warning message
+		v230804: Adds boolean ignoreHistograms option */
 		nonImageWindows = getList("window.titles");
+		// if (nonImageWindows.length==0) exit("No potential results windows are open");
 		if (nonImageWindows.length>0){
 			resultsWindows = newArray();
 			for (i=0; i<nonImageWindows.length; i++){
 				selectWindow(nonImageWindows[i]);
 				if(getInfo("window.type")=="ResultsTable")
-				resultsWindows = Array.concat(resultsWindows,nonImageWindows[i]);
+				if (!ignoreHistograms) resultsWindows = Array.concat(resultsWindows,nonImageWindows[i]);
+				else (indexOf(nonImageWindows[i],"Histogram")<0) resultsWindows = Array.concat(resultsWindows,nonImageWindows[i]);
 			}
 			return resultsWindows;
 		}
@@ -1107,25 +1114,24 @@
 		memFlush(200);
 		exit(message);
 	}
-	function selectResultsWindow(){
+	function selectResultsWindow(ignoreHistograms){
 		/* selects the Results window
-			v200722: 1st version */
-		nonImageWindows = getList("window.titles");
-		resultsWindows = newArray();
-		if (nonImageWindows.length!=0) {
-			for (i=0; i<nonImageWindows.length; i++){
-				selectWindow(nonImageWindows[i]);
-				if(getInfo("window.type")=="ResultsTable")
-					resultsWindows = Array.concat(resultsWindows,nonImageWindows[i]);
-			}
-		}
+			v200722: 1st version
+			v200723: Uses separate getResultsTableList function
+			v211027: if only one Results window found it selects it. Requires restoreExit function
+			v230804: Adds boolean ignoreHistograms option
+			*/
+		functionL = "selectResultsWindow function v230804";
+		resultsWindows = getResultsTableList(ignoreHistograms);
 		if (resultsWindows.length>1){
 			resultsWindows = Array.sort(resultsWindows); /* R for Results comes before S for Summary */
-			Dialog.create("Select table for analysis: v200722");
+			Dialog.create("Select table for analysis: " + functionL);
 			Dialog.addChoice("Choose Results Table: ",resultsWindows,resultsWindows[0]);
 			Dialog.show();
 			selectWindow(Dialog.getChoice());
 		}
+		else if (resultsWindows.length==1) selectWindow(resultsWindows[0]);
+		else restoreExit("Sorry, no results windows found");
   	}
 	function verifiedGetSet(setOrGet,key,openOrSave,optPath){
 		/* (setOrGet,key,altPath) setOrGet should be "set" or "get",
@@ -1133,6 +1139,7 @@
 		openOrSave is true/false if false the function just returns the prefs key
 		optPath is the alternative path for the call (could be just "" for get, needs to be the save path for set)
 		v230131: 1st version    Peter J. Lee  Applied Superconductivity Center NHMFL FS
+		v230811: fixed missing parenthesis.
 		*/
 		setOrGet = toLowerCase(setOrGet);
 		openImageN = nImages;
@@ -1190,7 +1197,7 @@
 			else if(endsWith(key,"Results")){
 				if(nResults>0){
 					if (openOrSave) saveAs("Results", optPath);
-					if (File.exists(optPath){
+					if (File.exists(optPath)){
 						if (File.length(optPath)>0) success = true;
 					}
 				}
@@ -1241,7 +1248,7 @@
 		else if (colorName == "aqua_modern") cA = newArray(75,172,198); /* #4bacc6 AKA "Viking" aqua */
 		else if (colorName == "blue_accent_modern") cA = newArray(79,129,189); /* #4f81bd */
 		else if (colorName == "blue_dark_modern") cA = newArray(31,73,125); /* #1F497D */
-		else if (colorName == "blue_honolulu") cA = newArray(0,118,182); /* Honolulu Blue #30076B6 */
+		else if (colorName == "blue_honolulu") cA = newArray(0,118,182); /* Honolulu Blue #006db0 */
 		else if (colorName == "blue_modern") cA = newArray(58,93,174); /* #3a5dae */
 		else if (colorName == "gray_modern") cA = newArray(83,86,90); /* bright gray #53565A */
 		else if (colorName == "green_dark_modern") cA = newArray(121,133,65); /* Wasabi #798541 */
